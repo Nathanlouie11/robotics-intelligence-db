@@ -302,12 +302,24 @@ class ResearchSession:
             "technology_research", technology_name
         )
 
+        # Ensure technology exists in database
+        tech = self.db.get_technology_by_name(technology_name)
+        if not tech:
+            # Add as new technology with default category
+            self.db.add_technology(
+                name=technology_name,
+                category="emerging",
+                description=f"Auto-added from research: {technology_name}"
+            )
+
         queries = [
-            f"{technology_name} robotics technology overview",
-            f"{technology_name} capabilities specifications",
-            f"{technology_name} applications use cases",
-            f"{technology_name} market adoption trends",
-            f"{technology_name} leading companies providers"
+            f"{technology_name} robotics market size 2025 2026",
+            f"{technology_name} robotics market growth CAGR",
+            f"{technology_name} robotics technology overview capabilities",
+            f"{technology_name} robotics applications use cases",
+            f"{technology_name} robotics leading companies vendors",
+            f"{technology_name} robotics adoption trends statistics",
+            f"{technology_name} robotics investment funding"
         ]
 
         all_results = []
@@ -321,10 +333,15 @@ class ResearchSession:
 
         context = results_to_context(all_results, max_results=30)
 
+        # Analyze with AI
         analysis = {}
         if context:
             try:
                 analysis = self.analyzer.analyze_technology(context, technology_name)
+
+                # Store extracted data points
+                self._store_technology_data_points(technology_name, analysis, all_results)
+
             except Exception as e:
                 logger.warning(f"Technology analysis failed: {e}")
                 analysis = {"error": str(e)}
@@ -336,9 +353,46 @@ class ResearchSession:
             "research_timestamp": datetime.now().isoformat(),
             "queries_run": self.queries_run,
             "sources_found": self.sources_found,
+            "data_points_created": self.data_points_created,
             "sources": [r.to_dict() for r in all_results[:15]],
             "analysis": analysis
         }
+
+    def _store_technology_data_points(self, technology_name: str,
+                                       analysis: Dict, sources: List):
+        """Store extracted technology data points."""
+        try:
+            # Store market size if found
+            if "market_size" in str(analysis):
+                # Try to extract from analysis
+                pass  # AI already extracts structured data
+
+            # Store any structured data from analysis
+            if isinstance(analysis, dict) and not analysis.get("error"):
+                # Store the analysis as a data point
+                source_id = None
+                if sources:
+                    source_id = self.db.get_or_create_source(
+                        name=sources[0].title if hasattr(sources[0], 'title') else "Research",
+                        url=sources[0].url if hasattr(sources[0], 'url') else None,
+                        source_type="research_report"
+                    )
+
+                # Store market growth rate if available
+                if analysis.get("key_metrics"):
+                    self.db.add_technology_data_point(
+                        technology_name=technology_name,
+                        dimension_name="market_growth_rate",
+                        value=analysis,
+                        year=datetime.now().year,
+                        source_id=source_id,
+                        confidence="medium",
+                        notes="Extracted from technology research"
+                    )
+                    self.data_points_created += 1
+
+        except Exception as e:
+            logger.warning(f"Failed to store technology data points: {e}")
 
 
 class DataIngestionPipeline:

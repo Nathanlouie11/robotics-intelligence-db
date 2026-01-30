@@ -129,6 +129,67 @@ DEFAULT_SECTORS = [
     }
 ]
 
+# Technologies taxonomy - cross-cutting robotics technologies
+DEFAULT_TECHNOLOGIES = [
+    # Perception & Sensing
+    {"name": "Computer Vision", "category": "perception", "maturity": "mature",
+     "description": "Camera-based object detection, recognition, and tracking"},
+    {"name": "LiDAR", "category": "perception", "maturity": "mature",
+     "description": "Light-based 3D mapping and distance measurement"},
+    {"name": "3D Depth Sensors", "category": "perception", "maturity": "mature",
+     "description": "Depth perception using structured light or ToF"},
+    {"name": "Force/Torque Sensors", "category": "perception", "maturity": "mature",
+     "description": "Contact and pressure sensing for manipulation"},
+    {"name": "Tactile Sensors", "category": "perception", "maturity": "growing",
+     "description": "Touch-based feedback for dexterous manipulation"},
+
+    # Navigation & Mobility
+    {"name": "SLAM", "category": "navigation", "maturity": "mature",
+     "description": "Simultaneous Localization and Mapping"},
+    {"name": "Autonomous Navigation", "category": "navigation", "maturity": "growing",
+     "description": "Self-driving without fixed infrastructure"},
+    {"name": "Path Planning", "category": "navigation", "maturity": "mature",
+     "description": "Route optimization and motion planning algorithms"},
+    {"name": "GPS/RTK Navigation", "category": "navigation", "maturity": "mature",
+     "description": "Precision outdoor positioning for agricultural/construction"},
+
+    # Manipulation & End Effectors
+    {"name": "Robotic Arms", "category": "manipulation", "maturity": "mature",
+     "description": "Articulated manipulators (6-axis, SCARA, delta)"},
+    {"name": "Robotic Grippers", "category": "manipulation", "maturity": "mature",
+     "description": "Mechanical, vacuum, and magnetic gripping systems"},
+    {"name": "Soft Robotics", "category": "manipulation", "maturity": "emerging",
+     "description": "Flexible, compliant robots and grippers"},
+    {"name": "Dexterous Hands", "category": "manipulation", "maturity": "emerging",
+     "description": "Human-like multi-finger manipulation"},
+
+    # AI & Software
+    {"name": "Machine Learning", "category": "ai_software", "maturity": "growing",
+     "description": "Neural networks and deep learning for robotics"},
+    {"name": "Reinforcement Learning", "category": "ai_software", "maturity": "emerging",
+     "description": "Learning robot behaviors through trial and error"},
+    {"name": "ROS/ROS2", "category": "ai_software", "maturity": "mature",
+     "description": "Robot Operating System middleware ecosystem"},
+    {"name": "Digital Twins", "category": "ai_software", "maturity": "growing",
+     "description": "Virtual simulation and testing of robots"},
+    {"name": "Fleet Management", "category": "ai_software", "maturity": "growing",
+     "description": "Multi-robot coordination and orchestration"},
+
+    # Safety & Collaboration
+    {"name": "Collaborative Safety", "category": "safety", "maturity": "mature",
+     "description": "Force limiting, speed monitoring for human-robot collaboration"},
+    {"name": "Safety LiDAR", "category": "safety", "maturity": "mature",
+     "description": "Zone-based safety systems and presence detection"},
+
+    # Connectivity & Edge
+    {"name": "5G Robotics", "category": "connectivity", "maturity": "emerging",
+     "description": "Low-latency wireless control and cloud connectivity"},
+    {"name": "Edge Computing", "category": "connectivity", "maturity": "growing",
+     "description": "On-robot AI processing and inference"},
+    {"name": "Cloud Robotics", "category": "connectivity", "maturity": "growing",
+     "description": "Remote processing, updates, and fleet management"},
+]
+
 # Data dimensions - what metrics we track
 DEFAULT_DIMENSIONS = [
     {"name": "market_size", "unit": "USD billions", "description": "Total addressable market size"},

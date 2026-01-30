@@ -9,7 +9,9 @@
       "Bash(git push:*)",
       "Bash(git commit -m \"$\\(cat <<''EOF''\nComplete research: all 6 robotics sectors with 271 structured data points\n\nSectors researched:\n- Mobile Robotics \\(63 data points\\)\n- Service Robotics \\(51 data points\\)\n- Industrial Robotics \\(50 data points\\)\n- Logistics Robotics \\(42 data points\\)\n- Construction Robotics \\(35 data points\\)\n- Agricultural Robotics \\(30 data points\\)\n\nTotal: 271 data points from 231 unique sources\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
       "Bash(python:*)",
-      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd CSV export script for Google Sheets compatibility\n\n- export_csv.py with multiple export modes:\n  - Full data export \\(271 rows\\)\n  - Summary by sector/dimension\n  - Growth rates only \\(63 CAGRs\\)\n  - Market sizes only\n- Filter by sector, dimension, year, validation status\n- Fix reporting.py to include pending data by default\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd CSV export script for Google Sheets compatibility\n\n- export_csv.py with multiple export modes:\n  - Full data export \\(271 rows\\)\n  - Summary by sector/dimension\n  - Growth rates only \\(63 CAGRs\\)\n  - Market sizes only\n- Filter by sector, dimension, year, validation status\n- Fix reporting.py to include pending data by default\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nAdd CSV exports for all 6 robotics sectors\n\nExports included:\n- robotics_data.csv: Full 271 data points\n- robotics_summary.csv: Summary by sector/dimension  \n- growth_rates.csv: 63 CAGR estimates with sources\n- market_sizes.csv: 17 market size projections\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
+      "Bash(git commit:*)"
     ]
   }
 }

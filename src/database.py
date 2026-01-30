@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Optional, List, Dict, Any, Tuple
 from contextlib import contextmanager
 
-from .config import DATABASE_PATH, DEFAULT_SECTORS, DEFAULT_DIMENSIONS
+from .config import DATABASE_PATH, DEFAULT_SECTORS, DEFAULT_DIMENSIONS, DEFAULT_TECHNOLOGIES
 
 
 class Database:
@@ -162,6 +162,56 @@ class Database:
                 )
             """)
 
+            # Technologies table - cross-cutting technologies
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS technologies (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT UNIQUE NOT NULL,
+                    category TEXT,  -- 'perception', 'navigation', 'manipulation', 'ai_software', 'safety', 'connectivity', 'power'
+                    description TEXT,
+                    maturity_level TEXT,  -- 'emerging', 'growing', 'mature'
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            # Technology-Sector mapping (many-to-many)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS technology_sectors (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    technology_id INTEGER NOT NULL,
+                    sector_id INTEGER NOT NULL,
+                    relevance TEXT,  -- 'high', 'medium', 'low'
+                    notes TEXT,
+                    FOREIGN KEY (technology_id) REFERENCES technologies(id),
+                    FOREIGN KEY (sector_id) REFERENCES sectors(id),
+                    UNIQUE(technology_id, sector_id)
+                )
+            """)
+
+            # Technology data points - extends data_points concept
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS technology_data_points (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    technology_id INTEGER NOT NULL,
+                    dimension_id INTEGER NOT NULL,
+                    value REAL,
+                    value_text TEXT,
+                    value_json TEXT,
+                    year INTEGER,
+                    source_id INTEGER,
+                    confidence TEXT DEFAULT 'medium',
+                    validation_status TEXT DEFAULT 'pending',
+                    notes TEXT,
+                    metadata TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (technology_id) REFERENCES technologies(id),
+                    FOREIGN KEY (dimension_id) REFERENCES dimensions(id),
+                    FOREIGN KEY (source_id) REFERENCES sources(id)
+                )
+            """)
+
             # Research sessions table - track research runs
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS research_sessions (
@@ -232,12 +282,23 @@ class Database:
                 if cursor.rowcount > 0:
                     dimensions_created += 1
 
+            # Insert default technologies
+            technologies_created = 0
+            for tech_data in DEFAULT_TECHNOLOGIES:
+                cursor.execute(
+                    "INSERT OR IGNORE INTO technologies (name, category, description, maturity_level) VALUES (?, ?, ?, ?)",
+                    (tech_data["name"], tech_data["category"], tech_data["description"], tech_data["maturity"])
+                )
+                if cursor.rowcount > 0:
+                    technologies_created += 1
+
             conn.commit()
 
         return {
             "sectors_created": sectors_created,
             "subcategories_created": subcategories_created,
-            "dimensions_created": dimensions_created
+            "dimensions_created": dimensions_created,
+            "technologies_created": technologies_created
         }
 
     # ==================== SECTOR OPERATIONS ====================
@@ -539,6 +600,141 @@ class Database:
                     data["old_value"] = json.loads(data["old_value"])
                 if data.get("new_value"):
                     data["new_value"] = json.loads(data["new_value"])
+                results.append(data)
+            return results
+
+    # ==================== TECHNOLOGY OPERATIONS ====================
+
+    def get_technologies(self, category: str = None) -> List[Dict[str, Any]]:
+        """Get all technologies, optionally filtered by category."""
+        query = "SELECT * FROM technologies"
+        params = []
+
+        if category:
+            query += " WHERE category = ?"
+            params.append(category)
+
+        query += " ORDER BY category, name"
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            return [dict(row) for row in cursor.fetchall()]
+
+    def get_technology_by_name(self, name: str) -> Optional[Dict[str, Any]]:
+        """Get a technology by name."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM technologies WHERE name = ?", (name,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def add_technology(self, name: str, category: str, description: str = None,
+                       maturity_level: str = "growing") -> int:
+        """Add a new technology."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR IGNORE INTO technologies (name, category, description, maturity_level)
+                VALUES (?, ?, ?, ?)
+            """, (name, category, description, maturity_level))
+            return cursor.lastrowid
+
+    def link_technology_to_sector(self, technology_name: str, sector_name: str,
+                                   relevance: str = "high", notes: str = None):
+        """Link a technology to a sector."""
+        tech = self.get_technology_by_name(technology_name)
+        sector = self.get_sector_by_name(sector_name)
+
+        if not tech or not sector:
+            return False
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT OR REPLACE INTO technology_sectors (technology_id, sector_id, relevance, notes)
+                VALUES (?, ?, ?, ?)
+            """, (tech["id"], sector["id"], relevance, notes))
+            return True
+
+    def add_technology_data_point(self, technology_name: str, dimension_name: str,
+                                   value: Any, year: int = None,
+                                   source_id: int = None, confidence: str = "medium",
+                                   notes: str = None, metadata: Dict = None) -> int:
+        """Add a data point for a technology."""
+        tech = self.get_technology_by_name(technology_name)
+        dim = self.get_dimension_by_name(dimension_name)
+
+        if not tech:
+            raise ValueError(f"Unknown technology: {technology_name}")
+        if not dim:
+            raise ValueError(f"Unknown dimension: {dimension_name}")
+
+        # Determine value storage
+        value_numeric = None
+        value_text = None
+        value_json = None
+
+        if isinstance(value, (int, float)):
+            value_numeric = float(value)
+        elif isinstance(value, dict):
+            value_json = json.dumps(value)
+        else:
+            value_text = str(value)
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO technology_data_points
+                (technology_id, dimension_id, value, value_text, value_json,
+                 year, source_id, confidence, notes, metadata)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (tech["id"], dim["id"], value_numeric, value_text, value_json,
+                  year, source_id, confidence, notes,
+                  json.dumps(metadata) if metadata else None))
+            return cursor.lastrowid
+
+    def get_technology_data_points(self, technology_name: str = None,
+                                    dimension_name: str = None,
+                                    limit: int = 100) -> List[Dict[str, Any]]:
+        """Get technology data points with filters."""
+        query = """
+            SELECT tdp.*,
+                   t.name as technology_name,
+                   t.category as technology_category,
+                   d.name as dimension_name,
+                   d.unit as dimension_unit,
+                   src.name as source_name,
+                   src.url as source_url
+            FROM technology_data_points tdp
+            LEFT JOIN technologies t ON tdp.technology_id = t.id
+            LEFT JOIN dimensions d ON tdp.dimension_id = d.id
+            LEFT JOIN sources src ON tdp.source_id = src.id
+            WHERE 1=1
+        """
+        params = []
+
+        if technology_name:
+            query += " AND t.name = ?"
+            params.append(technology_name)
+
+        if dimension_name:
+            query += " AND d.name = ?"
+            params.append(dimension_name)
+
+        query += " ORDER BY tdp.created_at DESC LIMIT ?"
+        params.append(limit)
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(query, params)
+            results = []
+            for row in cursor.fetchall():
+                data = dict(row)
+                if data.get("value_json"):
+                    data["value_structured"] = json.loads(data["value_json"])
+                if data.get("metadata"):
+                    data["metadata"] = json.loads(data["metadata"])
                 results.append(data)
             return results
 
