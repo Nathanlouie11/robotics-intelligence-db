@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python scripts/run_research.py:*)",
+      "Bash(python scripts/export_json.py:*)",
+      "Bash(git config:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m \"$\\(cat <<''EOF''\nFirst research run: Industrial Robotics with 50 structured data points\n\n- Complete project structure with 8 Python modules\n- SQLite database with sectors, dimensions, data_points, sources, changes_log, interviews tables\n- Brave Search integration with rate limiting\n- Ollama AI analysis \\(qwen2.5:32b\\) for structured JSON extraction\n- Validation workflow \\(pending -> validated/rejected\\)\n- Change detection \\(MoM/YoY tracking\\)\n- JSON export and reporting system\n- CLI tools: run_research.py, export_json.py\n- Test suite for database and validation\n\nCo-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>\nEOF\n\\)\")"
+    ]
+  }
+}

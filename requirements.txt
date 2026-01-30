@@ -1,0 +1,30 @@
+# Robotics Intelligence Database
+# Core dependencies
+
+# HTTP requests
+requests>=2.31.0
+
+# Environment variables
+python-dotenv>=1.0.0
+
+# Database
+# SQLite is built-in, no extra package needed
+
+# Data processing
+pandas>=2.0.0
+
+# JSON Schema validation
+jsonschema>=4.20.0
+
+# Date handling
+python-dateutil>=2.8.2
+
+# CLI colors (optional but nice)
+colorama>=0.4.6
+
+# Testing
+pytest>=7.4.0
+pytest-cov>=4.1.0
+
+# Type hints
+typing-extensions>=4.8.0
