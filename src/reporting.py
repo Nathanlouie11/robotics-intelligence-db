@@ -118,9 +118,12 @@ class ReportGenerator:
 
         return summary
 
-    def generate_full_database_export(self) -> Dict[str, Any]:
+    def generate_full_database_export(self, include_pending: bool = True) -> Dict[str, Any]:
         """
         Export entire database as structured JSON.
+
+        Args:
+            include_pending: Include pending (unvalidated) data points
 
         Returns:
             dict: Full database export
@@ -129,9 +132,10 @@ class ReportGenerator:
         dimensions = self.db.get_dimensions()
         stats = self.db.get_statistics()
 
-        # Get all validated data points
+        # Get all data points
+        validation_filter = None if include_pending else "validated"
         all_data_points = self.db.get_data_points(
-            validation_status="validated",
+            validation_status=validation_filter,
             limit=10000
         )
 
