@@ -71,7 +71,7 @@ venv.bak/
 Thumbs.db
 
 # Project specific
-data/robotics.db
+# data/robotics.db  # Uncomment to exclude database from git
 data/exports/*.json
 data/raw/*
 !data/raw/.gitkeep

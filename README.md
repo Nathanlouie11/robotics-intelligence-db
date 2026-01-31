@@ -4,6 +4,8 @@ A structured database system for tracking robotics industry intelligence, with A
 
 ## Features
 
+- **Interactive Dashboard**: Streamlit-based visualization and exploration
+- **AI Query Interface**: Natural language questions via Ollama
 - **Automated Research**: Web research via Brave Search API
 - **AI Analysis**: Local Ollama integration for structured data extraction
 - **SQLite Database**: Persistent storage with full audit trail
@@ -56,7 +58,18 @@ python scripts/run_research.py sector "Industrial Robotics"
 python scripts/run_research.py company "Boston Dynamics"
 ```
 
-### 6. Export Data
+### 6. Run Dashboard
+
+```bash
+python -m streamlit run scripts/run_dashboard.py
+```
+
+Open http://localhost:8501 to view:
+- **Dashboard**: Key metrics, growth rate charts, market size distribution
+- **Data Explorer**: Filterable table of all data points
+- **AI Query Interface**: Ask questions in natural language
+
+### 7. Export Data
 
 ```bash
 # Export full database
@@ -75,6 +88,7 @@ robotics-intelligence-db/
 │   ├── raw/              # Raw data files
 │   └── robotics.db       # SQLite database (created on init)
 ├── scripts/
+│   ├── run_dashboard.py  # Streamlit dashboard
 │   ├── run_research.py   # Research CLI tool
 │   └── export_json.py    # Export CLI tool
 ├── skills/
@@ -233,8 +247,18 @@ All exports are structured JSON. Example:
 ## Requirements
 
 - Python 3.9+
-- Ollama running locally with qwen2.5:32b model
-- Brave Search API key
+- Ollama running locally with qwen2.5:32b model (for AI features)
+- Brave Search API key (for research features)
+
+## Deploy to Streamlit Cloud
+
+1. Push this repo to GitHub
+2. Go to [share.streamlit.io](https://share.streamlit.io)
+3. Click "New app" and select your repository
+4. Set the main file path to: `scripts/run_dashboard.py`
+5. Deploy!
+
+**Note**: The AI Query Interface requires Ollama, which isn't available on Streamlit Cloud. The Dashboard and Data Explorer pages work fully in the cloud.
 
 ## License
 
