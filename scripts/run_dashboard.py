@@ -143,7 +143,7 @@ with st.sidebar:
     # Navigation
     page = st.radio(
         "Navigation",
-        ["📊 Dashboard", "🔍 Data Explorer", "📑 Technical Intelligence", "📋 Methodology", "💬 AI Query Interface"],
+        ["📊 Dashboard", "🔍 Data Explorer", "📑 Technical Intelligence", "✅ Validation", "📋 Methodology", "💬 AI Query Interface"],
         label_visibility="collapsed"
     )
 
@@ -548,6 +548,294 @@ elif page == "📑 Technical Intelligence":
         st.info("Reports directory not found. Creating...")
         reports_dir.mkdir(parents=True, exist_ok=True)
         st.markdown("Please add technical intelligence reports to `data/reports/`")
+
+
+elif page == "✅ Validation":
+    st.title("Data Validation Workflow")
+    st.markdown("Review and validate AI-generated data points and sources.")
+
+    # Tabs for different validation tasks
+    val_tab1, val_tab2, val_tab3 = st.tabs(["📊 Data Points", "🔗 Sources", "📈 Statistics"])
+
+    with val_tab1:
+        st.subheader("Validate Data Points")
+
+        # Filters
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            val_status_filter = st.selectbox(
+                "Validation Status",
+                ["pending", "All", "in_review", "validated", "rejected", "outdated"],
+                key="dp_val_status"
+            )
+
+        with col2:
+            conf_filter = st.selectbox(
+                "Confidence Level",
+                ["All", "high", "medium", "low", "unverified"],
+                key="dp_conf"
+            )
+
+        with col3:
+            sector_list = run_query("SELECT name FROM sectors ORDER BY name")
+            sector_filter_val = st.selectbox(
+                "Sector",
+                ["All"] + sector_list['name'].tolist(),
+                key="dp_sector"
+            )
+
+        # Build query
+        dp_query = """
+            SELECT
+                dp.id,
+                s.name as sector,
+                sub.name as subcategory,
+                d.name as dimension,
+                dp.value,
+                dp.value_text,
+                dp.year,
+                dp.confidence,
+                dp.validation_status,
+                src.name as source,
+                src.url as source_url,
+                dp.notes
+            FROM data_points dp
+            LEFT JOIN sectors s ON dp.sector_id = s.id
+            LEFT JOIN subcategories sub ON dp.subcategory_id = sub.id
+            LEFT JOIN dimensions d ON dp.dimension_id = d.id
+            LEFT JOIN sources src ON dp.source_id = src.id
+            WHERE 1=1
+        """
+        params = []
+
+        if val_status_filter != "All":
+            dp_query += " AND dp.validation_status = ?"
+            params.append(val_status_filter)
+
+        if conf_filter != "All":
+            dp_query += " AND dp.confidence = ?"
+            params.append(conf_filter)
+
+        if sector_filter_val != "All":
+            dp_query += " AND s.name = ?"
+            params.append(sector_filter_val)
+
+        dp_query += " ORDER BY dp.id DESC LIMIT 100"
+
+        dp_df = run_query(dp_query, tuple(params))
+
+        st.markdown(f"**{len(dp_df)} data points** matching filters")
+
+        if not dp_df.empty:
+            # Display with validation controls
+            for idx, row in dp_df.iterrows():
+                with st.expander(f"ID {row['id']}: {row['sector']} > {row['subcategory'] or 'N/A'} | {row['dimension']} = {row['value_text'] or row['value']}"):
+                    col1, col2 = st.columns([2, 1])
+
+                    with col1:
+                        st.markdown(f"""
+                        **Sector:** {row['sector']}
+                        **Subcategory:** {row['subcategory'] or 'N/A'}
+                        **Dimension:** {row['dimension']}
+                        **Value:** {row['value']} ({row['value_text'] or 'N/A'})
+                        **Year:** {row['year']}
+                        **Source:** {row['source']}
+                        **Notes:** {row['notes'] or 'N/A'}
+                        """)
+
+                        if row['source_url']:
+                            st.markdown(f"🔗 [Verify Source]({row['source_url']})")
+
+                    with col2:
+                        new_status = st.selectbox(
+                            "Status",
+                            ["pending", "in_review", "validated", "rejected", "outdated"],
+                            index=["pending", "in_review", "validated", "rejected", "outdated"].index(row['validation_status']) if row['validation_status'] in ["pending", "in_review", "validated", "rejected", "outdated"] else 0,
+                            key=f"status_{row['id']}"
+                        )
+
+                        new_conf = st.selectbox(
+                            "Confidence",
+                            ["high", "medium", "low", "unverified"],
+                            index=["high", "medium", "low", "unverified"].index(row['confidence']) if row['confidence'] in ["high", "medium", "low", "unverified"] else 1,
+                            key=f"conf_{row['id']}"
+                        )
+
+                        if st.button("💾 Save", key=f"save_{row['id']}"):
+                            conn = get_db_connection()
+                            cursor = conn.cursor()
+                            cursor.execute("""
+                                UPDATE data_points
+                                SET validation_status = ?, confidence = ?, validated_at = CURRENT_TIMESTAMP
+                                WHERE id = ?
+                            """, (new_status, new_conf, row['id']))
+                            conn.commit()
+                            st.success(f"Updated ID {row['id']}")
+                            st.rerun()
+
+    with val_tab2:
+        st.subheader("Validate Sources")
+
+        # Source type filter
+        source_type_filter = st.selectbox(
+            "Source Type",
+            ["ai_generated", "All", "research_report", "news", "company", "government"],
+            key="src_type"
+        )
+
+        # Build source query
+        src_query = """
+            SELECT
+                id,
+                name,
+                url,
+                source_type,
+                reliability_score,
+                (SELECT COUNT(*) FROM data_points WHERE source_id = sources.id) as data_point_count
+            FROM sources
+            WHERE 1=1
+        """
+        src_params = []
+
+        if source_type_filter != "All":
+            src_query += " AND source_type = ?"
+            src_params.append(source_type_filter)
+
+        src_query += " ORDER BY id DESC LIMIT 50"
+
+        src_df = run_query(src_query, tuple(src_params))
+
+        st.markdown(f"**{len(src_df)} sources** matching filters")
+
+        if not src_df.empty:
+            for idx, row in src_df.iterrows():
+                with st.expander(f"ID {row['id']}: {row['name'][:60]}... ({row['data_point_count']} data points)"):
+                    col1, col2 = st.columns([2, 1])
+
+                    with col1:
+                        st.markdown(f"**Name:** {row['name']}")
+                        st.markdown(f"**Current Type:** {row['source_type']}")
+                        st.markdown(f"**Reliability Score:** {row['reliability_score']}")
+                        st.markdown(f"**Data Points Using:** {row['data_point_count']}")
+
+                        if row['url']:
+                            st.markdown(f"🔗 [Visit Source]({row['url']})")
+                        else:
+                            st.warning("No URL set")
+
+                    with col2:
+                        new_url = st.text_input(
+                            "URL",
+                            value=row['url'] or "",
+                            key=f"url_{row['id']}"
+                        )
+
+                        new_type = st.selectbox(
+                            "Type",
+                            ["ai_generated", "research_report", "news", "company", "government", "academic"],
+                            index=["ai_generated", "research_report", "news", "company", "government", "academic"].index(row['source_type']) if row['source_type'] in ["ai_generated", "research_report", "news", "company", "government", "academic"] else 0,
+                            key=f"type_{row['id']}"
+                        )
+
+                        new_reliability = st.slider(
+                            "Reliability",
+                            0.0, 1.0,
+                            value=float(row['reliability_score']) if row['reliability_score'] else 0.5,
+                            step=0.1,
+                            key=f"rel_{row['id']}"
+                        )
+
+                        if st.button("💾 Save", key=f"save_src_{row['id']}"):
+                            conn = get_db_connection()
+                            cursor = conn.cursor()
+                            cursor.execute("""
+                                UPDATE sources
+                                SET url = ?, source_type = ?, reliability_score = ?
+                                WHERE id = ?
+                            """, (new_url, new_type, new_reliability, row['id']))
+                            conn.commit()
+                            st.success(f"Updated source ID {row['id']}")
+                            st.rerun()
+
+    with val_tab3:
+        st.subheader("Validation Statistics")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**Data Point Validation Status**")
+            val_stats = run_query("""
+                SELECT validation_status, COUNT(*) as count,
+                       ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM data_points), 1) as percent
+                FROM data_points
+                GROUP BY validation_status
+                ORDER BY count DESC
+            """)
+            st.dataframe(val_stats, hide_index=True, use_container_width=True)
+
+            # Progress bar
+            validated_count = val_stats[val_stats['validation_status'] == 'validated']['count'].sum() if 'validated' in val_stats['validation_status'].values else 0
+            total_count = val_stats['count'].sum()
+            progress = validated_count / total_count if total_count > 0 else 0
+            st.progress(progress, text=f"{validated_count}/{total_count} validated ({progress*100:.1f}%)")
+
+        with col2:
+            st.markdown("**Source Types**")
+            src_stats = run_query("""
+                SELECT source_type, COUNT(*) as count,
+                       ROUND(AVG(reliability_score), 2) as avg_reliability
+                FROM sources
+                GROUP BY source_type
+                ORDER BY count DESC
+            """)
+            st.dataframe(src_stats, hide_index=True, use_container_width=True)
+
+        st.markdown("---")
+
+        st.markdown("**Confidence Level Distribution**")
+        conf_stats = run_query("""
+            SELECT confidence, COUNT(*) as count
+            FROM data_points
+            GROUP BY confidence
+            ORDER BY count DESC
+        """)
+
+        import plotly.express as px
+        fig = px.pie(conf_stats, values='count', names='confidence', title='Data Points by Confidence')
+        st.plotly_chart(fig, use_container_width=True)
+
+        # Quick actions
+        st.markdown("---")
+        st.subheader("Bulk Actions")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if st.button("🔄 Mark all 'high' confidence as 'validated'"):
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE data_points
+                    SET validation_status = 'validated', validated_at = CURRENT_TIMESTAMP
+                    WHERE confidence = 'high' AND validation_status = 'pending'
+                """)
+                affected = cursor.rowcount
+                conn.commit()
+                st.success(f"Updated {affected} data points")
+
+        with col2:
+            if st.button("🔄 Upgrade 'ai_generated' sources with URLs to 'research_report'"):
+                conn = get_db_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE sources
+                    SET source_type = 'research_report', reliability_score = 0.7
+                    WHERE source_type = 'ai_generated' AND url IS NOT NULL AND url != ''
+                """)
+                affected = cursor.rowcount
+                conn.commit()
+                st.success(f"Updated {affected} sources")
 
 
 elif page == "📋 Methodology":
