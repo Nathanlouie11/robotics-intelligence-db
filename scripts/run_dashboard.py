@@ -143,7 +143,7 @@ with st.sidebar:
     # Navigation
     page = st.radio(
         "Navigation",
-        ["📊 Dashboard", "🔍 Data Explorer", "📑 Technical Intelligence", "💬 AI Query Interface"],
+        ["📊 Dashboard", "🔍 Data Explorer", "📑 Technical Intelligence", "📋 Methodology", "💬 AI Query Interface"],
         label_visibility="collapsed"
     )
 
@@ -548,6 +548,169 @@ elif page == "📑 Technical Intelligence":
         st.info("Reports directory not found. Creating...")
         reports_dir.mkdir(parents=True, exist_ok=True)
         st.markdown("Please add technical intelligence reports to `data/reports/`")
+
+
+elif page == "📋 Methodology":
+    st.title("Data Methodology")
+    st.markdown("How data is collected, categorized, and interpreted in this database.")
+
+    st.markdown("---")
+
+    # Data Collection
+    st.header("1. Data Collection Process")
+    st.markdown("""
+    Data points are collected using **Kimi K2.5** AI via the OpenRouter API. The AI:
+    1. Searches for quantitative robotics industry data
+    2. Extracts specific metrics with sources
+    3. Returns structured data in a consistent format
+
+    Each data point includes:
+    - **Sector** and **Subcategory** classification
+    - **Dimension** (metric type)
+    - **Value** (numeric) and **Value Text** (original with units)
+    - **Year**, **Source**, and **Confidence Level**
+    """)
+
+    st.markdown("---")
+
+    # Dimension Reference
+    st.header("2. Dimension Reference (How to Interpret Values)")
+
+    dimension_query = """
+        SELECT name, unit, description,
+               (SELECT COUNT(*) FROM data_points WHERE dimension_id = dimensions.id) as count
+        FROM dimensions
+        WHERE name NOT IN ('[correct enum]')
+        ORDER BY count DESC
+    """
+    dim_df = run_query(dimension_query)
+
+    st.markdown("Each dimension has a specific unit of measurement:")
+
+    st.dataframe(
+        dim_df,
+        column_config={
+            'name': st.column_config.TextColumn('Dimension', width='medium'),
+            'unit': st.column_config.TextColumn('Unit', width='small'),
+            'description': st.column_config.TextColumn('Description', width='large'),
+            'count': st.column_config.NumberColumn('Data Points', format='%d')
+        },
+        hide_index=True,
+        use_container_width=True
+    )
+
+    st.markdown("""
+    **Interpreting Values:**
+
+    | Dimension | Value Example | Interpretation |
+    |-----------|---------------|----------------|
+    | `market_size` | 4.2 | **$4.2 billion** USD |
+    | `market_growth_rate` | 23.5 | **23.5% CAGR** (compound annual growth rate) |
+    | `unit_shipments` | 125000 | **125,000 units** shipped |
+    | `average_price` | 15000 | **$15,000 USD** per unit |
+    | `r&d_investment` | 35 | **$35 million** USD investment |
+    | `adoption_rate` | 34 | **34%** market penetration |
+    | `roi_timeline` | 18 | **18 months** payback period |
+    | `patents_filed` | 1247 | **1,247 patents** filed |
+    | `performance_metric` | varies | See `value_text` for specific metric and units |
+    | `technical_capability` | varies | See `value_text` for specific capability |
+
+    **Note:** For dimensions marked "varies", always check the `value_text` column for the original
+    text with units (e.g., "99.2% accuracy" or "50kg payload capacity").
+    """)
+
+    st.markdown("---")
+
+    # Confidence Levels
+    st.header("3. Confidence Levels")
+
+    st.markdown("""
+    | Level | Meaning | Source Quality |
+    |-------|---------|----------------|
+    | **high** | Verified from authoritative source | Company reports, peer-reviewed research, government data |
+    | **medium** | Reasonable estimate from credible source | Industry reports, news articles, analyst estimates |
+    | **low** | Uncertain or speculative | Blog posts, unverified claims, rough estimates |
+    | **unverified** | Not yet validated | AI-generated, needs review |
+    """)
+
+    conf_query = """
+        SELECT confidence, COUNT(*) as count,
+               ROUND(COUNT(*) * 100.0 / (SELECT COUNT(*) FROM data_points), 1) as percent
+        FROM data_points
+        GROUP BY confidence
+        ORDER BY count DESC
+    """
+    conf_df = run_query(conf_query)
+    st.dataframe(conf_df, hide_index=True)
+
+    st.markdown("---")
+
+    # Validation Status
+    st.header("4. Validation Status")
+
+    st.markdown("""
+    | Status | Meaning |
+    |--------|---------|
+    | **pending** | Awaiting review |
+    | **in_review** | Currently being validated |
+    | **validated** | Confirmed accurate |
+    | **rejected** | Found to be inaccurate |
+    | **outdated** | Superseded by newer data |
+    """)
+
+    st.markdown("---")
+
+    # Value Extraction
+    st.header("5. Value Extraction Methodology")
+
+    st.markdown("""
+    **How numeric values are extracted from text:**
+
+    ```
+    Original Text: "$4.2B market size by 2025"
+    ↓
+    Regex: r'[\\d,]+\\.?\\d*' extracts first number
+    ↓
+    Numeric Value: 4.2
+    ```
+
+    **Limitations:**
+    - Only the **first number** is extracted from text
+    - For ranges like "12-18 months", only **12** is captured
+    - Currency symbols and suffixes (B, M, K) are **not** factored into the numeric value
+    - Always reference `value_text` for complete context
+
+    **Best Practice:** When analyzing data, use:
+    - `value` column for calculations and charts
+    - `value_text` column for full context and units
+    - `unit` from dimensions table for interpretation
+    """)
+
+    st.markdown("---")
+
+    # Data Sources
+    st.header("6. Source Types")
+
+    source_query = """
+        SELECT source_type, COUNT(*) as count
+        FROM sources
+        WHERE source_type IS NOT NULL
+        GROUP BY source_type
+        ORDER BY count DESC
+    """
+    source_df = run_query(source_query)
+
+    if not source_df.empty:
+        st.dataframe(source_df, hide_index=True)
+
+    st.markdown("""
+    **Source Reliability:**
+    - Company filings and reports (high reliability)
+    - Research firms (McKinsey, Gartner, IDC) (high reliability)
+    - Industry associations (medium-high reliability)
+    - News and press releases (medium reliability)
+    - AI-generated estimates (requires validation)
+    """)
 
 
 elif page == "💬 AI Query Interface":
