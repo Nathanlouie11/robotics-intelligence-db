@@ -144,7 +144,7 @@ with st.sidebar:
     # Navigation
     page = st.radio(
         "Navigation",
-        ["📊 Dashboard", "🔍 Data Explorer", "💬 AI Query Interface"],
+        ["📊 Dashboard", "🔍 Data Explorer", "📑 Technical Intelligence", "💬 AI Query Interface"],
         label_visibility="collapsed"
     )
 
@@ -473,6 +473,82 @@ elif page == "🔍 Data Explorer":
         st.dataframe(tech_df, width='stretch', height=300)
     else:
         st.info("No technology data points available yet.")
+
+
+elif page == "📑 Technical Intelligence":
+    st.title("Technical Intelligence Reports")
+    st.markdown("Deep-dive analysis of breakthroughs, R&D activity, patents, and technical hurdles by sector.")
+
+    # Get list of reports
+    reports_dir = project_root / "data" / "reports"
+
+    if reports_dir.exists():
+        report_files = list(reports_dir.glob("*_technical_intelligence.md"))
+
+        if report_files:
+            # Create sector selector
+            sector_names = {
+                "agricultural_robotics": "Agricultural Robotics",
+                "construction_robotics": "Construction Robotics",
+                "industrial_robotics": "Industrial Robotics",
+                "logistics_robotics": "Logistics Robotics",
+                "mobile_robotics": "Mobile Robotics",
+                "service_robotics": "Service Robotics"
+            }
+
+            # Build options from available files
+            available_sectors = []
+            for f in sorted(report_files):
+                key = f.stem.replace("_technical_intelligence", "")
+                if key in sector_names:
+                    available_sectors.append((sector_names[key], f))
+
+            if available_sectors:
+                selected_sector = st.selectbox(
+                    "Select Sector",
+                    options=[name for name, _ in available_sectors],
+                    index=0
+                )
+
+                # Find the matching file
+                selected_file = None
+                for name, f in available_sectors:
+                    if name == selected_sector:
+                        selected_file = f
+                        break
+
+                if selected_file and selected_file.exists():
+                    st.markdown("---")
+
+                    # Read and display the report
+                    content = selected_file.read_text(encoding='utf-8')
+
+                    # Display report sections
+                    st.markdown(content)
+
+                    # Download button
+                    st.markdown("---")
+                    st.download_button(
+                        label=f"📥 Download {selected_sector} Report",
+                        data=content,
+                        file_name=selected_file.name,
+                        mime="text/markdown"
+                    )
+            else:
+                st.warning("No reports found in the expected format.")
+        else:
+            st.info("No technical intelligence reports available yet.")
+            st.markdown("""
+            Run the expansion script to generate reports:
+            ```bash
+            python expand_robotics_db.py
+            # Select option 4: Research technical innovations & R&D
+            ```
+            """)
+    else:
+        st.info("Reports directory not found. Creating...")
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        st.markdown("Please add technical intelligence reports to `data/reports/`")
 
 
 elif page == "💬 AI Query Interface":
