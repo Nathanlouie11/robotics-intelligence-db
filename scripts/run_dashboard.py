@@ -31,8 +31,7 @@ st.set_page_config(
 )
 
 
-# Database connection
-@st.cache_resource
+# Database connection (no caching to ensure fresh data)
 def get_db_connection():
     """Get a database connection."""
     return sqlite3.connect(DATABASE_PATH, check_same_thread=False)
