@@ -72,8 +72,13 @@ Database Schema:
 - subcategories: id, sector_id, name, description
 - dimensions: id, name, unit, description
 - sources: id, name, url, source_type, reliability_score
+  * IMPORTANT: Company names are stored in sources.name
+  * Format: "[STARTUP] Company Name..." or "[Company Name] Report Title..."
+  * Example: "[STARTUP] Exotec raises $335 million..."
 - data_points: id, sector_id, subcategory_id, dimension_id, value, value_text,
                year, quarter, month, source_id, confidence, validation_status, notes
+  * value = numeric value (e.g., 335 for $335M)
+  * value_text = text description (e.g., "$335M Series B")
 - technologies: id, name, category, description, maturity_level
 - technology_data_points: id, technology_id, dimension_id, value, value_text, year, confidence
 
@@ -84,7 +89,15 @@ Key dimensions (metrics tracked):
 - average_selling_price (USD)
 - deployment_count (units)
 - adoption_rate (percent)
-- funding_raised (USD millions)
+- funding_raised (USD millions) - value is the amount, source.name contains company
+
+Example query for top funded companies:
+SELECT src.name as company_source, dp.value as funding_millions, dp.value_text, dp.year
+FROM data_points dp
+JOIN dimensions dim ON dp.dimension_id = dim.id
+JOIN sources src ON dp.source_id = src.id
+WHERE dim.name = 'funding_raised'
+ORDER BY dp.value DESC LIMIT 10;
 
 Confidence levels: high, medium, low, unverified
 Validation status: pending, in_review, validated, rejected, outdated
