@@ -2059,6 +2059,7 @@ elif page == "✅ Validation":
                 src.name as source_name,
                 src.url as source_url,
                 src.source_type,
+                src.publisher as source_publisher,
                 dp.notes
             FROM data_points dp
             LEFT JOIN sectors s ON dp.sector_id = s.id
@@ -2233,9 +2234,18 @@ elif page == "✅ Validation":
 
                     # Source / Origin Section
                     st.markdown("**Source & Origin**")
-                    src_col1, src_col2, src_col3 = st.columns(3)
+                    src_col1, src_col2 = st.columns(2)
 
                     with src_col1:
+                        # Publisher / Company name
+                        new_publisher = st.text_input(
+                            "Publisher / Research Firm",
+                            value=row['source_publisher'] or '',
+                            key=f"publisher_{row['id']}",
+                            placeholder="e.g., Interact Analysis, McKinsey, Figure AI",
+                            help="Name of the company or research firm that published this data"
+                        )
+
                         # Data origin - company vs research
                         source_type = row['source_type'] or 'ai_generated'
                         origin_options = ["company", "research_report", "news", "government", "academic", "meeting", "ai_generated"]
@@ -2259,39 +2269,23 @@ elif page == "✅ Validation":
                         )
 
                     with src_col2:
-                        # Company / Research firm name
-                        source_name = row['source_name'] or ''
-                        # Try to extract clean company name
-                        if source_name.startswith('[STARTUP]'):
-                            default_company = source_name.replace('[STARTUP] ', '').split(' funding')[0].split(' raises')[0].split(' -')[0].strip()
-                        elif source_name.startswith('[') and ']' in source_name:
-                            default_company = source_name[1:source_name.index(']')]
-                        else:
-                            default_company = source_name.split(' - ')[0].split(':')[0].strip() if source_name else ''
-
-                        new_company_name = st.text_input(
-                            "Company / Research Firm",
-                            value=default_company[:60],
-                            key=f"company_{row['id']}",
-                            help="Name of the company or research firm (e.g., 'McKinsey', 'Figure AI', 'IFR')"
-                        )
-
-                    with src_col3:
-                        # Source title
+                        # Source title (report/article name)
                         new_source_title = st.text_input(
-                            "Source Title",
-                            value=source_name[:80] if source_name else '',
+                            "Report / Article Title",
+                            value=row['source_name'] or '',
                             key=f"srctitle_{row['id']}",
+                            placeholder="e.g., Mobile Robots - January 2025",
                             help="Title of the report, article, or filing"
                         )
 
-                    # Source URL - editable
-                    new_source_url = st.text_input(
-                        "Source URL",
-                        value=row['source_url'] or '',
-                        key=f"srcurl_{row['id']}",
-                        help="Direct link to the source document, article, or filing"
-                    )
+                        # Source URL - editable
+                        new_source_url = st.text_input(
+                            "Source URL",
+                            value=row['source_url'] or '',
+                            key=f"srcurl_{row['id']}",
+                            placeholder="https://...",
+                            help="Direct link to the source document, article, or filing"
+                        )
 
                     st.markdown("**Data Values**")
                     edit_col1, edit_col2 = st.columns(2)
@@ -2398,19 +2392,19 @@ elif page == "✅ Validation":
                         """, (new_value, new_value_text, new_year, new_notes,
                               new_status, new_conf, new_sector_id, new_subcat_id, row['id']))
 
-                        # Update source record (origin, title, URL)
+                        # Update source record (publisher, title, URL, origin)
                         if row['source_id']:
                             cursor.execute("""
                                 UPDATE sources
-                                SET name = ?, url = ?, source_type = ?
+                                SET name = ?, url = ?, source_type = ?, publisher = ?
                                 WHERE id = ?
-                            """, (new_source_title, new_source_url, new_data_origin, row['source_id']))
-                        elif new_source_title or new_source_url:
+                            """, (new_source_title, new_source_url, new_data_origin, new_publisher, row['source_id']))
+                        elif new_source_title or new_source_url or new_publisher:
                             # Create new source if none exists
                             cursor.execute("""
-                                INSERT INTO sources (name, url, source_type, reliability_score)
-                                VALUES (?, ?, ?, 0.5)
-                            """, (new_source_title or new_company_name, new_source_url, new_data_origin))
+                                INSERT INTO sources (name, url, source_type, publisher, reliability_score)
+                                VALUES (?, ?, ?, ?, 0.5)
+                            """, (new_source_title or new_publisher, new_source_url, new_data_origin, new_publisher))
                             new_source_id = cursor.lastrowid
                             cursor.execute("UPDATE data_points SET source_id = ? WHERE id = ?", (new_source_id, row['id']))
 
@@ -2443,6 +2437,7 @@ elif page == "✅ Validation":
                 s.url,
                 s.source_type,
                 s.reliability_score,
+                s.publisher,
                 (SELECT COUNT(*) FROM data_points WHERE source_id = s.id) as data_point_count
             FROM sources s
             WHERE 1=1
@@ -2471,7 +2466,9 @@ elif page == "✅ Validation":
 
                     info_col1, info_col2 = st.columns(2)
                     with info_col1:
-                        st.markdown(f"**Source Name:** {row['name']}")
+                        if row['publisher']:
+                            st.markdown(f"**Publisher:** {row['publisher']}")
+                        st.markdown(f"**Report/Article:** {row['name']}")
                         st.markdown(f"**Type:** `{row['source_type']}`")
                     with info_col2:
                         reliability = row['reliability_score'] if row['reliability_score'] else 0.5
@@ -2526,22 +2523,30 @@ elif page == "✅ Validation":
                     edit_col1, edit_col2 = st.columns(2)
 
                     with edit_col1:
-                        new_name = st.text_input(
-                            "Source Name",
-                            value=row['name'],
-                            key=f"name_{row['id']}",
-                            help="e.g., 'IFR World Robotics 2024' or 'McKinsey Global Institute'"
+                        new_publisher = st.text_input(
+                            "Publisher / Research Firm",
+                            value=row['publisher'] or '',
+                            key=f"pub_{row['id']}",
+                            placeholder="e.g., Interact Analysis, McKinsey, IFR",
+                            help="Name of the company or research firm that published the data"
                         )
 
+                        new_name = st.text_input(
+                            "Report / Article Title",
+                            value=row['name'],
+                            key=f"name_{row['id']}",
+                            help="e.g., 'Mobile Robots - January 2025' or 'World Robotics 2024'"
+                        )
+
+                    with edit_col2:
                         new_type = st.selectbox(
                             "Source Type",
-                            ["ai_generated", "research_report", "news", "company", "government", "academic"],
-                            index=["ai_generated", "research_report", "news", "company", "government", "academic"].index(row['source_type']) if row['source_type'] in ["ai_generated", "research_report", "news", "company", "government", "academic"] else 0,
+                            ["ai_generated", "research_report", "news", "company", "government", "academic", "meeting"],
+                            index=["ai_generated", "research_report", "news", "company", "government", "academic", "meeting"].index(row['source_type']) if row['source_type'] in ["ai_generated", "research_report", "news", "company", "government", "academic", "meeting"] else 0,
                             key=f"type_{row['id']}",
                             help="ai_generated = Not verified | research_report = Industry report | company = Company disclosure"
                         )
 
-                    with edit_col2:
                         new_reliability = st.slider(
                             "Reliability Score",
                             0.0, 1.0,
@@ -2551,40 +2556,22 @@ elif page == "✅ Validation":
                             help="0.0 = Unreliable | 0.5 = Unverified | 0.8+ = Verified/trusted source"
                         )
 
-                    st.markdown("**URLs:**")
-                    url_col1, url_col2 = st.columns(2)
-
-                    with url_col1:
-                        # If URL looks like a specific report, pre-fill it here
-                        report_url_value = current_url if (current_url and not is_generic) else ""
-                        new_url = st.text_input(
-                            "Specific Report/Article URL",
-                            value=report_url_value,
-                            key=f"url_{row['id']}",
-                            help="Direct link to the specific report, PDF, or article containing the data"
-                        )
-
-                    with url_col2:
-                        # If URL looks generic (homepage), pre-fill it here
-                        homepage_url_value = current_url if (current_url and is_generic) else ""
-                        company_url = st.text_input(
-                            "Company/Publisher Homepage (optional)",
-                            value=homepage_url_value,
-                            key=f"compurl_{row['id']}",
-                            help="e.g., irobot.com or mckinsey.com - used if no specific report URL is available"
-                        )
-
-                    # Use specific URL if provided, otherwise fall back to company URL
-                    final_url = new_url.strip() if new_url.strip() else company_url.strip()
+                    # Source URL
+                    new_url = st.text_input(
+                        "Source URL",
+                        value=current_url,
+                        key=f"url_{row['id']}",
+                        help="Direct link to the specific report, PDF, or article containing the data"
+                    )
 
                     if st.button("💾 Save Changes", key=f"save_src_{row['id']}"):
                         conn = get_db_connection()
                         cursor = conn.cursor()
                         cursor.execute("""
                             UPDATE sources
-                            SET name = ?, url = ?, source_type = ?, reliability_score = ?
+                            SET name = ?, url = ?, source_type = ?, reliability_score = ?, publisher = ?
                             WHERE id = ?
-                        """, (new_name, final_url, new_type, new_reliability, row['id']))
+                        """, (new_name, new_url.strip(), new_type, new_reliability, new_publisher, row['id']))
                         conn.commit()
                         st.success(f"✅ Updated source #{row['id']}")
                         st.rerun()
