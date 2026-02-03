@@ -47,27 +47,27 @@ def generate_sector_pdf(sector_name, db_connection_func, run_query_func):
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=72)
 
-    # Styles
+    # Styles - create standalone to avoid conflicts on repeated calls
     styles = getSampleStyleSheet()
-    styles.add(ParagraphStyle(name='Title_Custom', parent=styles['Title'], fontSize=28, spaceAfter=30, textColor=colors.HexColor('#1a1a2e')))
-    styles.add(ParagraphStyle(name='Subtitle', parent=styles['Normal'], fontSize=14, spaceAfter=20, textColor=colors.HexColor('#4a4a6a')))
-    styles.add(ParagraphStyle(name='Section', parent=styles['Heading1'], fontSize=16, spaceBefore=20, spaceAfter=10, textColor=colors.HexColor('#16213e')))
-    styles.add(ParagraphStyle(name='Body_Custom', parent=styles['Normal'], fontSize=11, spaceAfter=12, alignment=TA_JUSTIFY, leading=14))
-    styles.add(ParagraphStyle(name='Bullet', parent=styles['Normal'], fontSize=10, leftIndent=20, spaceAfter=6))
+    title_style = ParagraphStyle('PDFTitle', parent=styles['Title'], fontSize=28, spaceAfter=30, textColor=colors.HexColor('#1a1a2e'))
+    subtitle_style = ParagraphStyle('PDFSubtitle', parent=styles['Normal'], fontSize=14, spaceAfter=20, textColor=colors.HexColor('#4a4a6a'))
+    section_style = ParagraphStyle('PDFSection', parent=styles['Heading1'], fontSize=16, spaceBefore=20, spaceAfter=10, textColor=colors.HexColor('#16213e'))
+    body_style = ParagraphStyle('PDFBody', parent=styles['Normal'], fontSize=11, spaceAfter=12, alignment=TA_JUSTIFY, leading=14)
+    bullet_style = ParagraphStyle('PDFBullet', parent=styles['Normal'], fontSize=10, leftIndent=20, spaceAfter=6)
 
     elements = []
 
     # Title Page
     elements.append(Spacer(1, 2*inch))
-    elements.append(Paragraph(f"Technical Intelligence Report", styles['Title_Custom']))
-    elements.append(Paragraph(f"{sector_name}", styles['Title_Custom']))
+    elements.append(Paragraph(f"Technical Intelligence Report", title_style))
+    elements.append(Paragraph(f"{sector_name}", title_style))
     elements.append(Spacer(1, 0.5*inch))
-    elements.append(Paragraph(f"Generated: {dt.now().strftime('%B %d, %Y')}", styles['Subtitle']))
-    elements.append(Paragraph("Robotics Intelligence Database", styles['Subtitle']))
+    elements.append(Paragraph(f"Generated: {dt.now().strftime('%B %d, %Y')}", subtitle_style))
+    elements.append(Paragraph("Robotics Intelligence Database", subtitle_style))
     elements.append(PageBreak())
 
     # Executive Summary
-    elements.append(Paragraph("Executive Summary", styles['Section']))
+    elements.append(Paragraph("Executive Summary", section_style))
 
     # Get sector data
     sector_data = run_query_func("""
@@ -79,15 +79,15 @@ def generate_sector_pdf(sector_name, db_connection_func, run_query_func):
     if not sector_data.empty:
         sector_id = sector_data.iloc[0]['id']
         desc = sector_data.iloc[0]['description'] or f"Analysis of the {sector_name} market."
-        elements.append(Paragraph(desc, styles['Body_Custom']))
+        elements.append(Paragraph(desc, body_style))
     else:
         sector_id = None
-        elements.append(Paragraph(f"Comprehensive analysis of the {sector_name} market, including market size, growth trends, key players, and industry challenges.", styles['Body_Custom']))
+        elements.append(Paragraph(f"Comprehensive analysis of the {sector_name} market, including market size, growth trends, key players, and industry challenges.", body_style))
 
     elements.append(Spacer(1, 0.3*inch))
 
     # Market Overview Section
-    elements.append(Paragraph("Market Overview", styles['Section']))
+    elements.append(Paragraph("Market Overview", section_style))
 
     # Get market data
     market_data = run_query_func("""
@@ -127,12 +127,12 @@ def generate_sector_pdf(sector_name, db_connection_func, run_query_func):
         ]))
         elements.append(t)
     else:
-        elements.append(Paragraph("Market data not yet available for this sector.", styles['Body_Custom']))
+        elements.append(Paragraph("Market data not yet available for this sector.", body_style))
 
     elements.append(Spacer(1, 0.3*inch))
 
     # Key Companies Section
-    elements.append(Paragraph("Key Companies & Funding", styles['Section']))
+    elements.append(Paragraph("Key Companies & Funding", section_style))
 
     companies_data = run_query_func("""
         SELECT DISTINCT c.name, c.company_type, c.total_funding_millions, c.status
@@ -174,12 +174,12 @@ def generate_sector_pdf(sector_name, db_connection_func, run_query_func):
         ]))
         elements.append(t)
     else:
-        elements.append(Paragraph("No company funding data available.", styles['Body_Custom']))
+        elements.append(Paragraph("No company funding data available.", body_style))
 
     elements.append(Spacer(1, 0.3*inch))
 
     # Recent Funding Activity
-    elements.append(Paragraph("Recent Funding Activity", styles['Section']))
+    elements.append(Paragraph("Recent Funding Activity", section_style))
 
     funding_data = run_query_func("""
         SELECT c.name, fr.round_type, fr.amount_millions, fr.announced_date, fr.lead_investors
@@ -198,14 +198,14 @@ def generate_sector_pdf(sector_name, db_connection_func, run_query_func):
             text = f"<b>{row['name']}</b> — {amount} ({round_type}) — {date}"
             if row['lead_investors']:
                 text += f"<br/><i>Lead: {row['lead_investors'][:50]}</i>"
-            elements.append(Paragraph(text, styles['Bullet']))
+            elements.append(Paragraph(text, bullet_style))
     else:
-        elements.append(Paragraph("No recent funding activity recorded.", styles['Body_Custom']))
+        elements.append(Paragraph("No recent funding activity recorded.", body_style))
 
     elements.append(PageBreak())
 
     # Industry Pain Points
-    elements.append(Paragraph("Industry Challenges & Pain Points", styles['Section']))
+    elements.append(Paragraph("Industry Challenges & Pain Points", section_style))
 
     pain_points = run_query_func("""
         SELECT pp.title, pp.category, pp.severity, pp.description, pp.potential_solutions
@@ -225,19 +225,19 @@ def generate_sector_pdf(sector_name, db_connection_func, run_query_func):
         for _, row in pain_points.iterrows():
             severity = (row['severity'] or 'medium').title()
             category = (row['category'] or 'other').replace('_', ' ').title()
-            elements.append(Paragraph(f"<b>{row['title']}</b> ({category} — {severity} Severity)", styles['Body_Custom']))
+            elements.append(Paragraph(f"<b>{row['title']}</b> ({category} — {severity} Severity)", body_style))
             if row['description']:
-                elements.append(Paragraph(row['description'][:300] + ('...' if len(row['description'] or '') > 300 else ''), styles['Bullet']))
+                elements.append(Paragraph(row['description'][:300] + ('...' if len(row['description'] or '') > 300 else ''), bullet_style))
             if row['potential_solutions']:
-                elements.append(Paragraph(f"<i>Solutions: {row['potential_solutions'][:200]}</i>", styles['Bullet']))
+                elements.append(Paragraph(f"<i>Solutions: {row['potential_solutions'][:200]}</i>", bullet_style))
             elements.append(Spacer(1, 0.1*inch))
     else:
-        elements.append(Paragraph("No pain points documented yet.", styles['Body_Custom']))
+        elements.append(Paragraph("No pain points documented yet.", body_style))
 
     elements.append(Spacer(1, 0.3*inch))
 
     # Partnerships Section
-    elements.append(Paragraph("Strategic Partnerships", styles['Section']))
+    elements.append(Paragraph("Strategic Partnerships", section_style))
 
     partnerships = run_query_func("""
         SELECT c.name as company1, p.company2_name, p.partnership_type, p.title, p.description
@@ -250,20 +250,20 @@ def generate_sector_pdf(sector_name, db_connection_func, run_query_func):
     if not partnerships.empty:
         for _, row in partnerships.iterrows():
             ptype = (row['partnership_type'] or 'other').replace('_', ' ').title()
-            elements.append(Paragraph(f"<b>{row['company1']}</b> + <b>{row['company2_name']}</b> ({ptype})", styles['Body_Custom']))
+            elements.append(Paragraph(f"<b>{row['company1']}</b> + <b>{row['company2_name']}</b> ({ptype})", body_style))
             if row['title']:
-                elements.append(Paragraph(row['title'], styles['Bullet']))
+                elements.append(Paragraph(row['title'], bullet_style))
             if row['description']:
-                elements.append(Paragraph(row['description'][:200], styles['Bullet']))
+                elements.append(Paragraph(row['description'][:200], bullet_style))
             elements.append(Spacer(1, 0.1*inch))
     else:
-        elements.append(Paragraph("No partnerships documented yet.", styles['Body_Custom']))
+        elements.append(Paragraph("No partnerships documented yet.", body_style))
 
     # Footer info
     elements.append(Spacer(1, 0.5*inch))
     elements.append(Paragraph("─" * 60, styles['Normal']))
-    elements.append(Paragraph(f"Report generated by Robotics Intelligence Database on {dt.now().strftime('%Y-%m-%d %H:%M')}", styles['Subtitle']))
-    elements.append(Paragraph("Data sources include industry reports, news, company filings, and meeting transcripts.", styles['Subtitle']))
+    elements.append(Paragraph(f"Report generated by Robotics Intelligence Database on {dt.now().strftime('%Y-%m-%d %H:%M')}", subtitle_style))
+    elements.append(Paragraph("Data sources include industry reports, news, company filings, and meeting transcripts.", subtitle_style))
 
     # Build PDF
     doc.build(elements)
