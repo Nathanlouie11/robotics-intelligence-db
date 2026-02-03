@@ -683,13 +683,19 @@ elif page == "✅ Validation":
                         else:
                             interpreted = val_text if val_text else str(val)
 
+                        # Safely convert year (might be float, NaN, or None)
+                        try:
+                            year_display = int(row['year']) if row['year'] and not pd.isna(row['year']) else 'N/A'
+                        except (ValueError, TypeError):
+                            year_display = 'N/A'
+
                         st.markdown(f"""
 | Field | Value |
 |-------|-------|
 | **Numeric Value** | {val} |
 | **Original Text** | {val_text or '(none)'} |
 | **Interpreted As** | **{interpreted}** |
-| **Year** | {int(row['year']) if row['year'] else 'N/A'} |
+| **Year** | {year_display} |
                         """)
 
                     # Source Information with enrichment badges
@@ -788,9 +794,15 @@ elif page == "✅ Validation":
                             help="E.g., '120,000 units shipped globally' or '$4.2B market size'"
                         )
 
+                        # Safely get year value
+                        try:
+                            year_val = int(row['year']) if row['year'] and not pd.isna(row['year']) else 2024
+                        except (ValueError, TypeError):
+                            year_val = 2024
+
                         new_year = st.number_input(
                             "Year",
-                            value=int(row['year']) if row['year'] else 2024,
+                            value=year_val,
                             min_value=2000,
                             max_value=2035,
                             key=f"year_{row['id']}"
