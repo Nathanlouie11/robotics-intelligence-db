@@ -24,7 +24,23 @@ import plotly.graph_objects as go
 from src.config import DATABASE_PATH, OLLAMA_HOST, OLLAMA_MODEL
 
 # OpenRouter API Configuration (for cloud deployment)
-OPENROUTER_KEY = os.getenv('OPENROUTER_KEY') or st.secrets.get("OPENROUTER_KEY", None) if hasattr(st, 'secrets') else None
+def get_openrouter_key():
+    """Get OpenRouter API key from various sources."""
+    # 1. Check environment variable
+    key = os.getenv('OPENROUTER_KEY')
+    if key:
+        return key
+    # 2. Check Streamlit secrets
+    try:
+        if hasattr(st, 'secrets') and 'OPENROUTER_KEY' in st.secrets:
+            return st.secrets['OPENROUTER_KEY']
+    except Exception:
+        pass
+    # 3. Check session state (user input)
+    if 'openrouter_key' in st.session_state and st.session_state.openrouter_key:
+        return st.session_state.openrouter_key
+    return None
+
 OPENROUTER_MODEL = "google/gemini-2.0-flash-lite-001"
 
 # Page configuration
@@ -142,7 +158,8 @@ def check_ollama_status() -> bool:
 
 def check_openrouter_status() -> bool:
     """Check if OpenRouter API key is available."""
-    return OPENROUTER_KEY is not None and len(OPENROUTER_KEY) > 10
+    key = get_openrouter_key()
+    return key is not None and len(key) > 10
 
 
 def query_openrouter(prompt: str, context: str = "") -> str:
@@ -163,10 +180,11 @@ When the user asks a question:
 Be concise and helpful."""
 
     try:
+        api_key = get_openrouter_key()
         response = requests.post(
             "https://openrouter.ai/api/v1/chat/completions",
             headers={
-                "Authorization": f"Bearer {OPENROUTER_KEY}",
+                "Authorization": f"Bearer {api_key}",
                 "Content-Type": "application/json",
                 "HTTP-Referer": "https://robotics-intelligence.streamlit.app"
             },
@@ -1371,20 +1389,22 @@ elif page == "💬 AI Query Interface":
     # Check AI backend status
     ai_backend = get_ai_backend()
     if not ai_backend:
-        st.error("""
-        **No AI backend available**
+        st.warning("**AI backend not configured.** Enter your OpenRouter API key below:")
 
-        **Option 1: OpenRouter (Cloud)**
-        Add `OPENROUTER_KEY` to Streamlit secrets (Settings → Secrets)
-        ```
-        OPENROUTER_KEY = "sk-or-v1-your-key-here"
-        ```
+        # API key input
+        api_key_input = st.text_input(
+            "OpenRouter API Key",
+            type="password",
+            placeholder="sk-or-v1-...",
+            help="Get your key from https://openrouter.ai/keys"
+        )
 
-        **Option 2: Ollama (Local)**
-        1. Install Ollama from https://ollama.ai
-        2. Run: `ollama serve`
-        3. Pull a model: `ollama pull qwen2.5:32b`
-        """)
+        if api_key_input:
+            st.session_state.openrouter_key = api_key_input
+            st.rerun()
+
+        st.info("Your key is stored in session only (not saved permanently).")
+        st.stop()
     else:
         st.success(f"✅ Using **{ai_backend.upper()}** backend")
         # Example queries
