@@ -6,6 +6,7 @@ Run with: streamlit run scripts/run_dashboard.py
 """
 
 import sys
+import os
 from pathlib import Path
 
 # Add project root to path
@@ -21,6 +22,10 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from src.config import DATABASE_PATH, OLLAMA_HOST, OLLAMA_MODEL
+
+# OpenRouter API Configuration (for cloud deployment)
+OPENROUTER_KEY = os.getenv('OPENROUTER_KEY') or st.secrets.get("OPENROUTER_KEY", None) if hasattr(st, 'secrets') else None
+OPENROUTER_MODEL = "google/gemini-2.0-flash-lite-001"
 
 # Page configuration
 st.set_page_config(
@@ -135,6 +140,64 @@ def check_ollama_status() -> bool:
         return False
 
 
+def check_openrouter_status() -> bool:
+    """Check if OpenRouter API key is available."""
+    return OPENROUTER_KEY is not None and len(OPENROUTER_KEY) > 10
+
+
+def query_openrouter(prompt: str, context: str = "") -> str:
+    """Query OpenRouter API for natural language processing."""
+    system_prompt = f"""You are a helpful assistant for a robotics intelligence database.
+You help users query and understand data about the robotics industry.
+
+{get_schema_info()}
+
+When the user asks a question:
+1. If they want data, generate a valid SQLite query
+2. Wrap SQL queries in ```sql and ``` tags
+3. Explain what the query does
+4. If they ask for analysis, provide insights based on available data
+
+{context}
+
+Be concise and helpful."""
+
+    try:
+        response = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_KEY}",
+                "Content-Type": "application/json",
+                "HTTP-Referer": "https://robotics-intelligence.streamlit.app"
+            },
+            json={
+                "model": OPENROUTER_MODEL,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": prompt}
+                ],
+                "max_tokens": 2000,
+                "temperature": 0.3
+            },
+            timeout=60
+        )
+        response.raise_for_status()
+        return response.json()['choices'][0]['message']['content']
+    except requests.exceptions.Timeout:
+        return "Error: Request timed out. Please try again."
+    except Exception as e:
+        return f"Error: {str(e)}"
+
+
+def get_ai_backend() -> str:
+    """Determine which AI backend is available."""
+    if check_ollama_status():
+        return "ollama"
+    elif check_openrouter_status():
+        return "openrouter"
+    return None
+
+
 # Sidebar
 with st.sidebar:
     st.title("🤖 Robotics Intelligence")
@@ -149,14 +212,17 @@ with st.sidebar:
 
     st.markdown("---")
 
-    # Ollama status
-    ollama_status = check_ollama_status()
-    if ollama_status:
-        st.success(f"✅ Ollama Connected")
+    # AI Backend status
+    ai_backend = get_ai_backend()
+    if ai_backend == "ollama":
+        st.success(f"✅ AI: Ollama")
         st.caption(f"Model: {OLLAMA_MODEL}")
+    elif ai_backend == "openrouter":
+        st.success(f"✅ AI: OpenRouter")
+        st.caption(f"Model: Gemini Flash")
     else:
-        st.error("❌ Ollama Offline")
-        st.caption(f"Expected at: {OLLAMA_HOST}")
+        st.warning("⚠️ AI Offline")
+        st.caption("Configure OPENROUTER_KEY in secrets")
 
     st.markdown("---")
     st.caption(f"Database: {Path(DATABASE_PATH).name}")
@@ -1302,17 +1368,25 @@ elif page == "💬 AI Query Interface":
     st.title("AI Query Interface")
     st.markdown("Ask questions about the robotics database in natural language.")
 
-    # Check Ollama status
-    if not ollama_status:
-        st.error(f"""
-        **Ollama is not available** at {OLLAMA_HOST}
+    # Check AI backend status
+    ai_backend = get_ai_backend()
+    if not ai_backend:
+        st.error("""
+        **No AI backend available**
 
-        Please make sure Ollama is running:
+        **Option 1: OpenRouter (Cloud)**
+        Add `OPENROUTER_KEY` to Streamlit secrets (Settings → Secrets)
+        ```
+        OPENROUTER_KEY = "sk-or-v1-your-key-here"
+        ```
+
+        **Option 2: Ollama (Local)**
         1. Install Ollama from https://ollama.ai
         2. Run: `ollama serve`
-        3. Pull the model: `ollama pull {OLLAMA_MODEL}`
+        3. Pull a model: `ollama pull qwen2.5:32b`
         """)
     else:
+        st.success(f"✅ Using **{ai_backend.upper()}** backend")
         # Example queries
         st.markdown("### Example Questions")
         example_cols = st.columns(2)
@@ -1364,8 +1438,11 @@ Current database contains:
 - Data from {summary['years_covered']} different years
 """
 
-                # Query the LLM
-                response = query_ollama(query_input, context)
+                # Query the LLM (use appropriate backend)
+                if ai_backend == "ollama":
+                    response = query_ollama(query_input, context)
+                else:
+                    response = query_openrouter(query_input, context)
 
                 # Display response
                 st.markdown("### Response")
