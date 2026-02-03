@@ -23,6 +23,253 @@ import plotly.graph_objects as go
 
 from src.config import DATABASE_PATH, OLLAMA_HOST, OLLAMA_MODEL
 
+# PDF Generation imports
+try:
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import letter, A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Image, Table, TableStyle, PageBreak
+    from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_JUSTIFY
+    PDF_AVAILABLE = True
+except ImportError:
+    PDF_AVAILABLE = False
+
+from io import BytesIO
+from datetime import datetime as dt
+
+
+def generate_sector_pdf(sector_name, db_connection_func, run_query_func):
+    """Generate a professional PDF report for a sector."""
+    if not PDF_AVAILABLE:
+        return None
+
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, rightMargin=72, leftMargin=72, topMargin=72, bottomMargin=72)
+
+    # Styles
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name='Title_Custom', parent=styles['Title'], fontSize=28, spaceAfter=30, textColor=colors.HexColor('#1a1a2e')))
+    styles.add(ParagraphStyle(name='Subtitle', parent=styles['Normal'], fontSize=14, spaceAfter=20, textColor=colors.HexColor('#4a4a6a')))
+    styles.add(ParagraphStyle(name='Section', parent=styles['Heading1'], fontSize=16, spaceBefore=20, spaceAfter=10, textColor=colors.HexColor('#16213e')))
+    styles.add(ParagraphStyle(name='Body_Custom', parent=styles['Normal'], fontSize=11, spaceAfter=12, alignment=TA_JUSTIFY, leading=14))
+    styles.add(ParagraphStyle(name='Bullet', parent=styles['Normal'], fontSize=10, leftIndent=20, spaceAfter=6))
+
+    elements = []
+
+    # Title Page
+    elements.append(Spacer(1, 2*inch))
+    elements.append(Paragraph(f"Technical Intelligence Report", styles['Title_Custom']))
+    elements.append(Paragraph(f"{sector_name}", styles['Title_Custom']))
+    elements.append(Spacer(1, 0.5*inch))
+    elements.append(Paragraph(f"Generated: {dt.now().strftime('%B %d, %Y')}", styles['Subtitle']))
+    elements.append(Paragraph("Robotics Intelligence Database", styles['Subtitle']))
+    elements.append(PageBreak())
+
+    # Executive Summary
+    elements.append(Paragraph("Executive Summary", styles['Section']))
+
+    # Get sector data
+    sector_data = run_query_func("""
+        SELECT s.id, s.name, s.description
+        FROM sectors s
+        WHERE s.name = ?
+    """, (sector_name,))
+
+    if not sector_data.empty:
+        sector_id = sector_data.iloc[0]['id']
+        desc = sector_data.iloc[0]['description'] or f"Analysis of the {sector_name} market."
+        elements.append(Paragraph(desc, styles['Body_Custom']))
+    else:
+        sector_id = None
+        elements.append(Paragraph(f"Comprehensive analysis of the {sector_name} market, including market size, growth trends, key players, and industry challenges.", styles['Body_Custom']))
+
+    elements.append(Spacer(1, 0.3*inch))
+
+    # Market Overview Section
+    elements.append(Paragraph("Market Overview", styles['Section']))
+
+    # Get market data
+    market_data = run_query_func("""
+        SELECT d.name as dimension, dp.value, dp.value_text, dp.year, dp.confidence
+        FROM data_points dp
+        JOIN dimensions d ON dp.dimension_id = d.id
+        JOIN sectors s ON dp.sector_id = s.id
+        WHERE s.name = ?
+        AND d.name IN ('market_size', 'market_growth_rate', 'unit_shipments', 'adoption_rate')
+        ORDER BY d.name, dp.year DESC
+    """, (sector_name,))
+
+    if not market_data.empty:
+        # Create market data table
+        table_data = [['Metric', 'Value', 'Year', 'Confidence']]
+        for _, row in market_data.head(10).iterrows():
+            dim = row['dimension'].replace('_', ' ').title()
+            val = row['value_text'] if row['value_text'] else str(row['value'])
+            table_data.append([dim, val[:40], str(int(row['year'])) if row['year'] else 'N/A', row['confidence'] or 'N/A'])
+
+        t = Table(table_data, colWidths=[2*inch, 2.5*inch, 1*inch, 1*inch])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#16213e')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#f8f9fa')),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#dee2e6')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 1), (-1, -1), 8),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+        ]))
+        elements.append(t)
+    else:
+        elements.append(Paragraph("Market data not yet available for this sector.", styles['Body_Custom']))
+
+    elements.append(Spacer(1, 0.3*inch))
+
+    # Key Companies Section
+    elements.append(Paragraph("Key Companies & Funding", styles['Section']))
+
+    companies_data = run_query_func("""
+        SELECT DISTINCT c.name, c.company_type, c.total_funding_millions, c.status
+        FROM companies c
+        JOIN funding_rounds fr ON fr.company_id = c.id
+        WHERE c.total_funding_millions > 0
+        ORDER BY c.total_funding_millions DESC
+        LIMIT 15
+    """)
+
+    if not companies_data.empty:
+        table_data = [['Company', 'Type', 'Total Funding', 'Status']]
+        for _, row in companies_data.iterrows():
+            funding = f"${row['total_funding_millions']:,.0f}M" if row['total_funding_millions'] else 'N/A'
+            table_data.append([
+                row['name'][:30],
+                (row['company_type'] or 'startup').title(),
+                funding,
+                (row['status'] or 'active').title()
+            ])
+
+        t = Table(table_data, colWidths=[2.5*inch, 1.2*inch, 1.5*inch, 1*inch])
+        t.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#16213e')),
+            ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('ALIGN', (2, 1), (2, -1), 'RIGHT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, 0), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+            ('BACKGROUND', (0, 1), (-1, -1), colors.HexColor('#f8f9fa')),
+            ('TEXTCOLOR', (0, 1), (-1, -1), colors.black),
+            ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+            ('FONTSIZE', (0, 1), (-1, -1), 9),
+            ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#dee2e6')),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('TOPPADDING', (0, 1), (-1, -1), 6),
+            ('BOTTOMPADDING', (0, 1), (-1, -1), 6),
+        ]))
+        elements.append(t)
+    else:
+        elements.append(Paragraph("No company funding data available.", styles['Body_Custom']))
+
+    elements.append(Spacer(1, 0.3*inch))
+
+    # Recent Funding Activity
+    elements.append(Paragraph("Recent Funding Activity", styles['Section']))
+
+    funding_data = run_query_func("""
+        SELECT c.name, fr.round_type, fr.amount_millions, fr.announced_date, fr.lead_investors
+        FROM funding_rounds fr
+        JOIN companies c ON fr.company_id = c.id
+        WHERE fr.amount_millions IS NOT NULL
+        ORDER BY fr.announced_date DESC, fr.amount_millions DESC
+        LIMIT 10
+    """)
+
+    if not funding_data.empty:
+        for _, row in funding_data.iterrows():
+            amount = f"${row['amount_millions']:,.0f}M" if row['amount_millions'] else 'Undisclosed'
+            round_type = (row['round_type'] or 'Unknown').replace('_', ' ').title()
+            date = row['announced_date'] or 'N/A'
+            text = f"<b>{row['name']}</b> — {amount} ({round_type}) — {date}"
+            if row['lead_investors']:
+                text += f"<br/><i>Lead: {row['lead_investors'][:50]}</i>"
+            elements.append(Paragraph(text, styles['Bullet']))
+    else:
+        elements.append(Paragraph("No recent funding activity recorded.", styles['Body_Custom']))
+
+    elements.append(PageBreak())
+
+    # Industry Pain Points
+    elements.append(Paragraph("Industry Challenges & Pain Points", styles['Section']))
+
+    pain_points = run_query_func("""
+        SELECT pp.title, pp.category, pp.severity, pp.description, pp.potential_solutions
+        FROM pain_points pp
+        ORDER BY
+            CASE pp.severity
+                WHEN 'critical' THEN 1
+                WHEN 'high' THEN 2
+                WHEN 'medium' THEN 3
+                WHEN 'low' THEN 4
+                ELSE 5
+            END
+        LIMIT 8
+    """)
+
+    if not pain_points.empty:
+        for _, row in pain_points.iterrows():
+            severity = (row['severity'] or 'medium').title()
+            category = (row['category'] or 'other').replace('_', ' ').title()
+            elements.append(Paragraph(f"<b>{row['title']}</b> ({category} — {severity} Severity)", styles['Body_Custom']))
+            if row['description']:
+                elements.append(Paragraph(row['description'][:300] + ('...' if len(row['description'] or '') > 300 else ''), styles['Bullet']))
+            if row['potential_solutions']:
+                elements.append(Paragraph(f"<i>Solutions: {row['potential_solutions'][:200]}</i>", styles['Bullet']))
+            elements.append(Spacer(1, 0.1*inch))
+    else:
+        elements.append(Paragraph("No pain points documented yet.", styles['Body_Custom']))
+
+    elements.append(Spacer(1, 0.3*inch))
+
+    # Partnerships Section
+    elements.append(Paragraph("Strategic Partnerships", styles['Section']))
+
+    partnerships = run_query_func("""
+        SELECT c.name as company1, p.company2_name, p.partnership_type, p.title, p.description
+        FROM partnerships p
+        JOIN companies c ON p.company1_id = c.id
+        ORDER BY p.id DESC
+        LIMIT 8
+    """)
+
+    if not partnerships.empty:
+        for _, row in partnerships.iterrows():
+            ptype = (row['partnership_type'] or 'other').replace('_', ' ').title()
+            elements.append(Paragraph(f"<b>{row['company1']}</b> + <b>{row['company2_name']}</b> ({ptype})", styles['Body_Custom']))
+            if row['title']:
+                elements.append(Paragraph(row['title'], styles['Bullet']))
+            if row['description']:
+                elements.append(Paragraph(row['description'][:200], styles['Bullet']))
+            elements.append(Spacer(1, 0.1*inch))
+    else:
+        elements.append(Paragraph("No partnerships documented yet.", styles['Body_Custom']))
+
+    # Footer info
+    elements.append(Spacer(1, 0.5*inch))
+    elements.append(Paragraph("─" * 60, styles['Normal']))
+    elements.append(Paragraph(f"Report generated by Robotics Intelligence Database on {dt.now().strftime('%Y-%m-%d %H:%M')}", styles['Subtitle']))
+    elements.append(Paragraph("Data sources include industry reports, news, company filings, and meeting transcripts.", styles['Subtitle']))
+
+    # Build PDF
+    doc.build(elements)
+    buffer.seek(0)
+    return buffer.getvalue()
+
 # OpenRouter API Configuration (for cloud deployment)
 def get_openrouter_key():
     """Get OpenRouter API key from various sources."""
@@ -1542,78 +1789,219 @@ elif page == "🔍 Data Explorer":
 
 elif page == "📑 Technical Intelligence":
     st.title("Technical Intelligence Reports")
-    st.markdown("Deep-dive analysis of breakthroughs, R&D activity, patents, and technical hurdles by sector.")
+    st.markdown("Deep-dive analysis of market data, funding, partnerships, and technical hurdles.")
 
-    # Get list of reports
+    # Sector selector using database
+    sectors_df = run_query("SELECT name FROM sectors ORDER BY name")
+    sector_list = sectors_df['name'].tolist() if not sectors_df.empty else ["Industrial Robotics", "Logistics Robotics", "Service Robotics"]
+
+    col1, col2 = st.columns([3, 1])
+    with col1:
+        selected_sector = st.selectbox("Select Sector", options=sector_list, index=0)
+    with col2:
+        st.markdown("<br>", unsafe_allow_html=True)
+        if PDF_AVAILABLE:
+            if st.button("📄 Generate PDF Report", type="primary"):
+                with st.spinner("Generating PDF report..."):
+                    pdf_data = generate_sector_pdf(selected_sector, get_db_connection, run_query)
+                    if pdf_data:
+                        st.session_state.pdf_data = pdf_data
+                        st.session_state.pdf_sector = selected_sector
+                        st.success("PDF ready for download!")
+        else:
+            st.warning("PDF generation unavailable")
+
+    # PDF download button (if generated)
+    if 'pdf_data' in st.session_state and st.session_state.get('pdf_sector') == selected_sector:
+        st.download_button(
+            label="📥 Download PDF Report",
+            data=st.session_state.pdf_data,
+            file_name=f"{selected_sector.lower().replace(' ', '_')}_intelligence_report.pdf",
+            mime="application/pdf"
+        )
+
+    st.markdown("---")
+
+    # Display live data report
+    st.subheader(f"📊 {selected_sector} Overview")
+
+    # Key metrics for sector
+    metric_col1, metric_col2, metric_col3, metric_col4 = st.columns(4)
+
+    # Get sector metrics
+    sector_metrics = run_query("""
+        SELECT d.name as dimension, dp.value, dp.value_text
+        FROM data_points dp
+        JOIN dimensions d ON dp.dimension_id = d.id
+        JOIN sectors s ON dp.sector_id = s.id
+        WHERE s.name = ?
+        ORDER BY dp.year DESC
+    """, (selected_sector,))
+
+    market_size = sector_metrics[sector_metrics['dimension'] == 'market_size']['value'].iloc[0] if 'market_size' in sector_metrics['dimension'].values else None
+    growth_rate = sector_metrics[sector_metrics['dimension'] == 'market_growth_rate']['value'].iloc[0] if 'market_growth_rate' in sector_metrics['dimension'].values else None
+
+    with metric_col1:
+        st.metric("Market Size", f"${market_size:.1f}B" if market_size else "N/A")
+    with metric_col2:
+        st.metric("Growth Rate", f"{growth_rate:.1f}%" if growth_rate else "N/A")
+    with metric_col3:
+        company_count = run_query("SELECT COUNT(*) as c FROM companies").iloc[0]['c']
+        st.metric("Companies Tracked", company_count)
+    with metric_col4:
+        pain_count = run_query("SELECT COUNT(*) as c FROM pain_points").iloc[0]['c']
+        st.metric("Pain Points", pain_count)
+
+    # Charts section
+    st.markdown("---")
+    chart_col1, chart_col2 = st.columns(2)
+
+    with chart_col1:
+        st.subheader("Top Funded Companies")
+        funding_chart_data = run_query("""
+            SELECT c.name, c.total_funding_millions
+            FROM companies c
+            WHERE c.total_funding_millions > 0
+            ORDER BY c.total_funding_millions DESC
+            LIMIT 10
+        """)
+
+        if not funding_chart_data.empty:
+            fig = px.bar(
+                funding_chart_data,
+                x='total_funding_millions',
+                y='name',
+                orientation='h',
+                labels={'total_funding_millions': 'Funding ($M)', 'name': ''},
+                color='total_funding_millions',
+                color_continuous_scale='Blues'
+            )
+            fig.update_layout(height=400, showlegend=False, yaxis={'categoryorder': 'total ascending'})
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No funding data available.")
+
+    with chart_col2:
+        st.subheader("Pain Points by Category")
+        pain_chart_data = run_query("""
+            SELECT category, COUNT(*) as count
+            FROM pain_points
+            WHERE category IS NOT NULL
+            GROUP BY category
+            ORDER BY count DESC
+        """)
+
+        if not pain_chart_data.empty:
+            fig = px.pie(
+                pain_chart_data,
+                values='count',
+                names='category',
+                hole=0.4,
+                color_discrete_sequence=px.colors.qualitative.Set2
+            )
+            fig.update_layout(height=400)
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("No pain point data available.")
+
+    # Funding timeline
+    st.markdown("---")
+    st.subheader("Funding Activity Timeline")
+
+    funding_timeline = run_query("""
+        SELECT
+            substr(fr.announced_date, 1, 7) as month,
+            SUM(fr.amount_millions) as total_millions,
+            COUNT(*) as deal_count
+        FROM funding_rounds fr
+        WHERE fr.announced_date IS NOT NULL AND fr.amount_millions IS NOT NULL
+        GROUP BY substr(fr.announced_date, 1, 7)
+        ORDER BY month
+    """)
+
+    if not funding_timeline.empty:
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=funding_timeline['month'],
+            y=funding_timeline['total_millions'],
+            name='Total Funding ($M)',
+            marker_color='#1f77b4'
+        ))
+        fig.add_trace(go.Scatter(
+            x=funding_timeline['month'],
+            y=funding_timeline['deal_count'],
+            name='Deal Count',
+            yaxis='y2',
+            mode='lines+markers',
+            marker_color='#ff7f0e'
+        ))
+        fig.update_layout(
+            yaxis=dict(title='Total Funding ($M)'),
+            yaxis2=dict(title='Deal Count', overlaying='y', side='right'),
+            height=350,
+            legend=dict(orientation='h', yanchor='bottom', y=1.02)
+        )
+        st.plotly_chart(fig, use_container_width=True)
+    else:
+        st.info("No funding timeline data available.")
+
+    # Recent Activity
+    st.markdown("---")
+    activity_col1, activity_col2 = st.columns(2)
+
+    with activity_col1:
+        st.subheader("Recent Funding Rounds")
+        recent_funding = run_query("""
+            SELECT c.name, fr.round_type, fr.amount_millions, fr.announced_date
+            FROM funding_rounds fr
+            JOIN companies c ON fr.company_id = c.id
+            ORDER BY fr.id DESC
+            LIMIT 5
+        """)
+        if not recent_funding.empty:
+            for _, row in recent_funding.iterrows():
+                amount = f"${row['amount_millions']:,.0f}M" if row['amount_millions'] else "Undisclosed"
+                st.markdown(f"**{row['name']}** — {amount} ({row['round_type'] or 'Unknown'})")
+        else:
+            st.info("No recent funding rounds.")
+
+    with activity_col2:
+        st.subheader("Recent Partnerships")
+        recent_partnerships = run_query("""
+            SELECT c.name, p.company2_name, p.partnership_type
+            FROM partnerships p
+            JOIN companies c ON p.company1_id = c.id
+            ORDER BY p.id DESC
+            LIMIT 5
+        """)
+        if not recent_partnerships.empty:
+            for _, row in recent_partnerships.iterrows():
+                st.markdown(f"**{row['name']}** + **{row['company2_name']}** ({row['partnership_type'] or 'other'})")
+        else:
+            st.info("No recent partnerships.")
+
+    # Legacy markdown reports (if available)
+    st.markdown("---")
     reports_dir = project_root / "data" / "reports"
-
     if reports_dir.exists():
         report_files = list(reports_dir.glob("*_technical_intelligence.md"))
-
         if report_files:
-            # Create sector selector
-            sector_names = {
-                "agricultural_robotics": "Agricultural Robotics",
-                "construction_robotics": "Construction Robotics",
-                "industrial_robotics": "Industrial Robotics",
-                "logistics_robotics": "Logistics Robotics",
-                "mobile_robotics": "Mobile Robotics",
-                "service_robotics": "Service Robotics"
-            }
-
-            # Build options from available files
-            available_sectors = []
-            for f in sorted(report_files):
-                key = f.stem.replace("_technical_intelligence", "")
-                if key in sector_names:
-                    available_sectors.append((sector_names[key], f))
-
-            if available_sectors:
-                selected_sector = st.selectbox(
-                    "Select Sector",
-                    options=[name for name, _ in available_sectors],
-                    index=0
-                )
-
-                # Find the matching file
-                selected_file = None
-                for name, f in available_sectors:
-                    if name == selected_sector:
-                        selected_file = f
-                        break
-
-                if selected_file and selected_file.exists():
-                    st.markdown("---")
-
-                    # Read and display the report
-                    content = selected_file.read_text(encoding='utf-8')
-
-                    # Display report sections
-                    st.markdown(content)
-
-                    # Download button
-                    st.markdown("---")
-                    st.download_button(
-                        label=f"📥 Download {selected_sector} Report",
-                        data=content,
-                        file_name=selected_file.name,
-                        mime="text/markdown"
-                    )
-            else:
-                st.warning("No reports found in the expected format.")
-        else:
-            st.info("No technical intelligence reports available yet.")
-            st.markdown("""
-            Run the expansion script to generate reports:
-            ```bash
-            python expand_robotics_db.py
-            # Select option 4: Research technical innovations & R&D
-            ```
-            """)
-    else:
-        st.info("Reports directory not found. Creating...")
-        reports_dir.mkdir(parents=True, exist_ok=True)
-        st.markdown("Please add technical intelligence reports to `data/reports/`")
+            with st.expander("📄 View Legacy Markdown Reports"):
+                sector_names = {
+                    "agricultural_robotics": "Agricultural Robotics",
+                    "construction_robotics": "Construction Robotics",
+                    "industrial_robotics": "Industrial Robotics",
+                    "logistics_robotics": "Logistics Robotics",
+                    "mobile_robotics": "Mobile Robotics",
+                    "service_robotics": "Service Robotics"
+                }
+                for f in sorted(report_files):
+                    key = f.stem.replace("_technical_intelligence", "")
+                    name = sector_names.get(key, key)
+                    content = f.read_text(encoding='utf-8')
+                    st.markdown(f"### {name}")
+                    st.markdown(content[:2000] + "..." if len(content) > 2000 else content)
+                    st.download_button(f"Download {name}", content, f.name, mime="text/markdown", key=f"dl_{key}")
 
 
 elif page == "✅ Validation":
