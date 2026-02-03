@@ -2231,10 +2231,72 @@ elif page == "✅ Validation":
                     # Edit Section
                     st.markdown("### ✏️ Edit Data Point")
 
+                    # Source / Origin Section
+                    st.markdown("**Source & Origin**")
+                    src_col1, src_col2, src_col3 = st.columns(3)
+
+                    with src_col1:
+                        # Data origin - company vs research
+                        source_type = row['source_type'] or 'ai_generated'
+                        origin_options = ["company", "research_report", "news", "government", "academic", "meeting", "ai_generated"]
+                        origin_labels = {
+                            "company": "Company Disclosure",
+                            "research_report": "Research / Industry Report",
+                            "news": "News Article",
+                            "government": "Government Data",
+                            "academic": "Academic Paper",
+                            "meeting": "Meeting / Interview",
+                            "ai_generated": "AI Generated (unverified)"
+                        }
+                        current_origin_idx = origin_options.index(source_type) if source_type in origin_options else len(origin_options) - 1
+                        new_data_origin = st.selectbox(
+                            "Data Origin",
+                            origin_options,
+                            index=current_origin_idx,
+                            format_func=lambda x: origin_labels.get(x, x),
+                            key=f"origin_{row['id']}",
+                            help="Where did this data point come from?"
+                        )
+
+                    with src_col2:
+                        # Company / Research firm name
+                        source_name = row['source_name'] or ''
+                        # Try to extract clean company name
+                        if source_name.startswith('[STARTUP]'):
+                            default_company = source_name.replace('[STARTUP] ', '').split(' funding')[0].split(' raises')[0].split(' -')[0].strip()
+                        elif source_name.startswith('[') and ']' in source_name:
+                            default_company = source_name[1:source_name.index(']')]
+                        else:
+                            default_company = source_name.split(' - ')[0].split(':')[0].strip() if source_name else ''
+
+                        new_company_name = st.text_input(
+                            "Company / Research Firm",
+                            value=default_company[:60],
+                            key=f"company_{row['id']}",
+                            help="Name of the company or research firm (e.g., 'McKinsey', 'Figure AI', 'IFR')"
+                        )
+
+                    with src_col3:
+                        # Source title
+                        new_source_title = st.text_input(
+                            "Source Title",
+                            value=source_name[:80] if source_name else '',
+                            key=f"srctitle_{row['id']}",
+                            help="Title of the report, article, or filing"
+                        )
+
+                    # Source URL - editable
+                    new_source_url = st.text_input(
+                        "Source URL",
+                        value=row['source_url'] or '',
+                        key=f"srcurl_{row['id']}",
+                        help="Direct link to the source document, article, or filing"
+                    )
+
+                    st.markdown("**Data Values**")
                     edit_col1, edit_col2 = st.columns(2)
 
                     with edit_col1:
-                        # Editable fields
                         new_value = st.number_input(
                             "Numeric Value",
                             value=float(row['value']) if row['value'] else 0.0,
@@ -2324,6 +2386,7 @@ elif page == "✅ Validation":
                             if not subcat_match.empty:
                                 new_subcat_id = subcat_match['id'].iloc[0]
 
+                        # Update data point
                         cursor.execute("""
                             UPDATE data_points
                             SET value = ?, value_text = ?, year = ?, notes = ?,
@@ -2334,8 +2397,25 @@ elif page == "✅ Validation":
                             WHERE id = ?
                         """, (new_value, new_value_text, new_year, new_notes,
                               new_status, new_conf, new_sector_id, new_subcat_id, row['id']))
+
+                        # Update source record (origin, title, URL)
+                        if row['source_id']:
+                            cursor.execute("""
+                                UPDATE sources
+                                SET name = ?, url = ?, source_type = ?
+                                WHERE id = ?
+                            """, (new_source_title, new_source_url, new_data_origin, row['source_id']))
+                        elif new_source_title or new_source_url:
+                            # Create new source if none exists
+                            cursor.execute("""
+                                INSERT INTO sources (name, url, source_type, reliability_score)
+                                VALUES (?, ?, ?, 0.5)
+                            """, (new_source_title or new_company_name, new_source_url, new_data_origin))
+                            new_source_id = cursor.lastrowid
+                            cursor.execute("UPDATE data_points SET source_id = ? WHERE id = ?", (new_source_id, row['id']))
+
                         conn.commit()
-                        st.success(f"✅ Updated data point ID {row['id']}")
+                        st.success(f"✅ Updated data point ID {row['id']} and source")
                         st.rerun()
 
     with val_tab2:
