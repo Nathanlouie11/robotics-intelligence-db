@@ -237,7 +237,7 @@ with st.sidebar:
     # Navigation
     page = st.radio(
         "Navigation",
-        ["📊 Dashboard", "🔍 Data Explorer", "📑 Technical Intelligence", "✅ Validation", "📋 Methodology", "💬 AI Query Interface"],
+        ["📊 Dashboard", "🏢 Companies", "📈 Market Signals", "🔍 Data Explorer", "📑 Technical Intelligence", "✅ Validation", "📋 Methodology", "💬 AI Query Interface"],
         label_visibility="collapsed"
     )
 
@@ -415,6 +415,360 @@ if page == "📊 Dashboard":
             )
             fig.update_layout(height=350, showlegend=False)
             st.plotly_chart(fig, width='stretch')
+
+
+elif page == "🏢 Companies":
+    st.title("Company Profiles")
+    st.markdown("Track robotics companies with funding history and status.")
+
+    # Check if companies table exists
+    try:
+        companies_count = run_query("SELECT COUNT(*) as count FROM companies").iloc[0]['count']
+    except:
+        st.warning("Companies table not found. Run `python scripts/expand_schema.py` to create it.")
+        st.stop()
+
+    # Key metrics
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("🏢 Total Companies", companies_count)
+    with col2:
+        startup_count = run_query("SELECT COUNT(*) as count FROM companies WHERE company_type = 'startup'").iloc[0]['count']
+        st.metric("🚀 Startups", startup_count)
+    with col3:
+        total_funding = run_query("SELECT SUM(total_funding_millions) as total FROM companies").iloc[0]['total'] or 0
+        st.metric("💰 Total Funding", f"${total_funding:,.0f}M")
+    with col4:
+        funding_rounds = run_query("SELECT COUNT(*) as count FROM funding_rounds").iloc[0]['count']
+        st.metric("📊 Funding Rounds", funding_rounds)
+
+    st.markdown("---")
+
+    # Filters
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        company_type_filter = st.selectbox(
+            "Company Type",
+            ["All", "startup", "enterprise", "public", "research"],
+            key="company_type"
+        )
+
+    with col2:
+        status_filter = st.selectbox(
+            "Status",
+            ["All", "active", "acquired", "defunct", "ipo"],
+            key="company_status"
+        )
+
+    with col3:
+        search_term = st.text_input("Search Company Name", key="company_search")
+
+    # Build query
+    company_query = """
+        SELECT
+            c.id,
+            c.name,
+            c.company_type,
+            c.status,
+            c.founded_year,
+            c.hq_country,
+            c.employee_count,
+            c.total_funding_millions,
+            c.website,
+            (SELECT COUNT(*) FROM funding_rounds WHERE company_id = c.id) as funding_rounds,
+            (SELECT MAX(announced_date) FROM funding_rounds WHERE company_id = c.id) as last_funding
+        FROM companies c
+        WHERE 1=1
+    """
+    params = []
+
+    if company_type_filter != "All":
+        company_query += " AND c.company_type = ?"
+        params.append(company_type_filter)
+
+    if status_filter != "All":
+        company_query += " AND c.status = ?"
+        params.append(status_filter)
+
+    if search_term:
+        company_query += " AND c.name LIKE ?"
+        params.append(f"%{search_term}%")
+
+    company_query += " ORDER BY c.total_funding_millions DESC NULLS LAST LIMIT 100"
+
+    companies_df = run_query(company_query, tuple(params))
+
+    st.subheader(f"Companies ({len(companies_df)} results)")
+
+    if not companies_df.empty:
+        for idx, row in companies_df.iterrows():
+            # Status badge
+            status_emoji = {"active": "🟢", "acquired": "🔵", "defunct": "🔴", "ipo": "🟡"}.get(row['status'], "⚪")
+            type_emoji = {"startup": "🚀", "enterprise": "🏢", "public": "📈", "research": "🔬"}.get(row['company_type'], "")
+
+            funding_display = f"${row['total_funding_millions']:,.0f}M" if row['total_funding_millions'] else "N/A"
+
+            with st.expander(f"{status_emoji} {type_emoji} **{row['name']}** — {funding_display} raised"):
+                info_col1, info_col2 = st.columns(2)
+
+                with info_col1:
+                    st.markdown(f"""
+| Field | Value |
+|-------|-------|
+| **Type** | {row['company_type'] or 'N/A'} |
+| **Status** | {row['status'] or 'N/A'} |
+| **Founded** | {int(row['founded_year']) if row['founded_year'] else 'N/A'} |
+| **HQ** | {row['hq_country'] or 'N/A'} |
+| **Employees** | {row['employee_count'] or 'N/A'} |
+                    """)
+
+                with info_col2:
+                    st.markdown(f"""
+| Funding | Value |
+|---------|-------|
+| **Total Raised** | {funding_display} |
+| **Rounds** | {row['funding_rounds']} |
+| **Last Funding** | {row['last_funding'] or 'N/A'} |
+                    """)
+                    if row['website']:
+                        st.markdown(f"**Website:** [{row['website']}]({row['website']})")
+
+                # Show funding rounds
+                if row['funding_rounds'] > 0:
+                    st.markdown("**Funding History:**")
+                    rounds_df = run_query("""
+                        SELECT round_type, amount_millions, announced_date, lead_investors
+                        FROM funding_rounds
+                        WHERE company_id = ?
+                        ORDER BY announced_date DESC
+                    """, (row['id'],))
+
+                    for _, r in rounds_df.iterrows():
+                        amount = f"${r['amount_millions']:,.0f}M" if r['amount_millions'] else "Undisclosed"
+                        st.markdown(f"- **{r['round_type'] or 'Unknown'}**: {amount} ({r['announced_date'] or 'Date N/A'})")
+    else:
+        st.info("No companies match the selected filters.")
+
+    # Top funded chart
+    st.markdown("---")
+    st.subheader("Top 10 Funded Companies")
+
+    top_funded = run_query("""
+        SELECT name, total_funding_millions, company_type
+        FROM companies
+        WHERE total_funding_millions IS NOT NULL AND total_funding_millions > 0
+        ORDER BY total_funding_millions DESC
+        LIMIT 10
+    """)
+
+    if not top_funded.empty:
+        fig = px.bar(
+            top_funded,
+            x='total_funding_millions',
+            y='name',
+            orientation='h',
+            color='company_type',
+            labels={'total_funding_millions': 'Total Funding ($ Millions)', 'name': 'Company'},
+            title='Top 10 Companies by Total Funding'
+        )
+        fig.update_layout(height=400, yaxis={'categoryorder': 'total ascending'})
+        st.plotly_chart(fig, use_container_width=True)
+
+
+elif page == "📈 Market Signals":
+    st.title("Market Signals & Trends")
+    st.markdown("Track funding announcements, partnerships, pain points, and adoption signals.")
+
+    # Check if tables exist
+    try:
+        funding_count = run_query("SELECT COUNT(*) as count FROM funding_rounds").iloc[0]['count']
+        partnership_count = run_query("SELECT COUNT(*) as count FROM partnerships").iloc[0]['count']
+        pain_point_count = run_query("SELECT COUNT(*) as count FROM pain_points").iloc[0]['count']
+    except:
+        st.warning("Market signal tables not found. Run `python scripts/expand_schema.py` to create them.")
+        st.stop()
+
+    # Key metrics
+    col1, col2, col3, col4 = st.columns(4)
+
+    with col1:
+        st.metric("💰 Funding Rounds", funding_count)
+    with col2:
+        st.metric("🤝 Partnerships", partnership_count)
+    with col3:
+        st.metric("⚠️ Pain Points", pain_point_count)
+    with col4:
+        try:
+            adoption_count = run_query("SELECT COUNT(*) as count FROM adoption_signals").iloc[0]['count']
+        except:
+            adoption_count = 0
+        st.metric("📊 Adoption Signals", adoption_count)
+
+    # Tabs for different signal types
+    signal_tab1, signal_tab2, signal_tab3 = st.tabs(["💰 Recent Funding", "🤝 Partnerships", "⚠️ Pain Points"])
+
+    with signal_tab1:
+        st.subheader("Recent Funding Rounds")
+
+        funding_df = run_query("""
+            SELECT
+                fr.id,
+                c.name as company,
+                fr.round_type,
+                fr.amount_millions,
+                fr.announced_date,
+                fr.lead_investors,
+                fr.source_url
+            FROM funding_rounds fr
+            LEFT JOIN companies c ON fr.company_id = c.id
+            ORDER BY fr.announced_date DESC, fr.id DESC
+            LIMIT 50
+        """)
+
+        if not funding_df.empty:
+            for _, row in funding_df.iterrows():
+                amount = f"${row['amount_millions']:,.0f}M" if row['amount_millions'] else "Undisclosed"
+                round_type = row['round_type'] or 'Unknown'
+
+                # Color based on round type
+                round_colors = {
+                    'seed': '🌱', 'series_a': '🅰️', 'series_b': '🅱️',
+                    'series_c': '©️', 'series_d': '🇩', 'series_e': '🇪',
+                    'growth': '📈', 'ipo': '🔔', 'acquisition': '🏆'
+                }
+                emoji = round_colors.get(round_type, '💵')
+
+                st.markdown(f"{emoji} **{row['company'] or 'Unknown Company'}** — **{amount}** ({round_type})")
+                st.caption(f"Announced: {row['announced_date'] or 'N/A'} | Lead: {row['lead_investors'] or 'N/A'}")
+                if row['source_url']:
+                    st.caption(f"[Source]({row['source_url']})")
+                st.markdown("---")
+        else:
+            st.info("No funding rounds recorded yet. Run `python scripts/refresh_data.py --funding` to fetch data.")
+
+        # Funding by round type chart
+        funding_by_type = run_query("""
+            SELECT round_type, COUNT(*) as count, SUM(amount_millions) as total_millions
+            FROM funding_rounds
+            WHERE round_type IS NOT NULL
+            GROUP BY round_type
+            ORDER BY total_millions DESC
+        """)
+
+        if not funding_by_type.empty:
+            st.subheader("Funding by Round Type")
+            fig = px.bar(
+                funding_by_type,
+                x='round_type',
+                y='total_millions',
+                color='count',
+                labels={'round_type': 'Round Type', 'total_millions': 'Total Amount ($M)', 'count': 'Number of Rounds'},
+                title='Total Funding by Round Type'
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+    with signal_tab2:
+        st.subheader("Strategic Partnerships")
+
+        partnerships_df = run_query("""
+            SELECT
+                p.id,
+                c1.name as company1,
+                COALESCE(c2.name, p.company2_name) as company2,
+                p.partnership_type,
+                p.title,
+                p.description,
+                p.announcement_date,
+                p.source_url
+            FROM partnerships p
+            LEFT JOIN companies c1 ON p.company1_id = c1.id
+            LEFT JOIN companies c2 ON p.company2_id = c2.id
+            ORDER BY p.announcement_date DESC, p.id DESC
+            LIMIT 30
+        """)
+
+        if not partnerships_df.empty:
+            for _, row in partnerships_df.iterrows():
+                type_emoji = {
+                    'integration': '🔗', 'distribution': '📦', 'manufacturing': '🏭',
+                    'research': '🔬', 'investment': '💰', 'acquisition': '🏆',
+                    'joint_venture': '🤝', 'customer': '👤', 'supplier': '📤'
+                }.get(row['partnership_type'], '🤝')
+
+                st.markdown(f"{type_emoji} **{row['company1'] or 'Company'}** ↔ **{row['company2'] or 'Partner'}**")
+                if row['title']:
+                    st.markdown(f"*{row['title']}*")
+                if row['description']:
+                    st.caption(row['description'][:200] + ('...' if len(row['description'] or '') > 200 else ''))
+                st.caption(f"Type: {row['partnership_type'] or 'N/A'} | Date: {row['announcement_date'] or 'N/A'}")
+                if row['source_url']:
+                    st.caption(f"[Source]({row['source_url']})")
+                st.markdown("---")
+        else:
+            st.info("No partnerships recorded yet. Run `python scripts/refresh_data.py --partnerships` to fetch data.")
+
+    with signal_tab3:
+        st.subheader("Industry Pain Points")
+
+        pain_points_df = run_query("""
+            SELECT
+                pp.id,
+                pp.title,
+                pp.category,
+                pp.scale,
+                pp.severity,
+                pp.description,
+                pp.potential_solutions,
+                pp.frequency_mentioned,
+                s.name as sector
+            FROM pain_points pp
+            LEFT JOIN sectors s ON pp.sector_id = s.id
+            ORDER BY pp.severity DESC, pp.frequency_mentioned DESC
+            LIMIT 30
+        """)
+
+        if not pain_points_df.empty:
+            for _, row in pain_points_df.iterrows():
+                severity_emoji = {'critical': '🔴', 'high': '🟠', 'medium': '🟡', 'low': '🟢'}.get(row['severity'], '⚪')
+                category_emoji = {
+                    'technical': '⚙️', 'cost': '💰', 'integration': '🔗',
+                    'workforce': '👷', 'regulatory': '📜', 'safety': '🛡️',
+                    'scalability': '📈', 'reliability': '🔧'
+                }.get(row['category'], '❓')
+
+                st.markdown(f"{severity_emoji} {category_emoji} **{row['title']}**")
+                st.caption(f"Category: {row['category']} | Severity: {row['severity']} | Scale: {row['scale']} | Sector: {row['sector'] or 'Industry-wide'}")
+                if row['description']:
+                    st.markdown(row['description'][:300] + ('...' if len(row['description'] or '') > 300 else ''))
+                if row['potential_solutions']:
+                    st.info(f"**Potential Solutions:** {row['potential_solutions'][:200]}")
+                st.markdown("---")
+        else:
+            st.info("No pain points recorded yet. Run `python scripts/refresh_data.py --pain-points` to fetch data.")
+
+        # Pain points by category chart
+        pain_by_category = run_query("""
+            SELECT category, COUNT(*) as count, severity
+            FROM pain_points
+            WHERE category IS NOT NULL
+            GROUP BY category, severity
+            ORDER BY count DESC
+        """)
+
+        if not pain_by_category.empty:
+            st.subheader("Pain Points by Category")
+            fig = px.bar(
+                pain_by_category,
+                x='category',
+                y='count',
+                color='severity',
+                color_discrete_map={'critical': '#dc3545', 'high': '#fd7e14', 'medium': '#ffc107', 'low': '#28a745'},
+                labels={'category': 'Category', 'count': 'Count', 'severity': 'Severity'},
+                title='Pain Points Distribution'
+            )
+            st.plotly_chart(fig, use_container_width=True)
 
 
 elif page == "🔍 Data Explorer":
