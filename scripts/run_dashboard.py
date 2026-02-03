@@ -585,20 +585,26 @@ elif page == "✅ Validation":
                 key="dp_sector"
             )
 
-        # Build query
+        # Build query with more details
         dp_query = """
             SELECT
                 dp.id,
+                dp.sector_id,
                 s.name as sector,
+                dp.subcategory_id,
                 sub.name as subcategory,
+                dp.dimension_id,
                 d.name as dimension,
+                d.unit as dimension_unit,
                 dp.value,
                 dp.value_text,
                 dp.year,
                 dp.confidence,
                 dp.validation_status,
-                src.name as source,
+                dp.source_id,
+                src.name as source_name,
                 src.url as source_url,
+                src.source_type,
                 dp.notes
             FROM data_points dp
             LEFT JOIN sectors s ON dp.sector_id = s.id
@@ -625,138 +631,417 @@ elif page == "✅ Validation":
 
         dp_df = run_query(dp_query, tuple(params))
 
+        # Get lookup data for dropdowns
+        all_sectors = run_query("SELECT id, name FROM sectors ORDER BY name")
+        all_dimensions = run_query("SELECT id, name, unit FROM dimensions ORDER BY name")
+        all_subcategories = run_query("SELECT id, sector_id, name FROM subcategories ORDER BY name")
+
         st.markdown(f"**{len(dp_df)} data points** matching filters")
 
         if not dp_df.empty:
-            # Display with validation controls
             for idx, row in dp_df.iterrows():
-                with st.expander(f"ID {row['id']}: {row['sector']} > {row['subcategory'] or 'N/A'} | {row['dimension']} = {row['value_text'] or row['value']}"):
-                    col1, col2 = st.columns([2, 1])
+                with st.expander(f"ID {row['id']}: {row['sector']} → {row['subcategory'] or 'General'} | {row['dimension']}"):
 
-                    with col1:
+                    # Current Data Display (Clear formatting)
+                    st.markdown("### 📊 Current Data")
+
+                    info_col1, info_col2 = st.columns(2)
+
+                    with info_col1:
                         st.markdown(f"""
-                        **Sector:** {row['sector']}
-                        **Subcategory:** {row['subcategory'] or 'N/A'}
-                        **Dimension:** {row['dimension']}
-                        **Value:** {row['value']} ({row['value_text'] or 'N/A'})
-                        **Year:** {row['year']}
-                        **Source:** {row['source']}
-                        **Notes:** {row['notes'] or 'N/A'}
+| Field | Value |
+|-------|-------|
+| **ID** | {row['id']} |
+| **Sector** | {row['sector']} |
+| **Subcategory** | {row['subcategory'] or '(none)'} |
+| **Metric Type** | {row['dimension']} |
+| **Unit** | {row['dimension_unit'] or 'see value_text'} |
                         """)
 
-                        if row['source_url']:
-                            st.markdown(f"🔗 [Verify Source]({row['source_url']})")
+                    with info_col2:
+                        # Format value with unit interpretation
+                        unit = row['dimension_unit'] or ''
+                        val = row['value']
+                        val_text = row['value_text'] or ''
 
-                    with col2:
+                        if row['dimension'] == 'market_size':
+                            interpreted = f"${val} billion USD" if val else val_text
+                        elif row['dimension'] == 'market_growth_rate':
+                            interpreted = f"{val}% CAGR" if val else val_text
+                        elif row['dimension'] == 'average_price':
+                            interpreted = f"${val:,.0f} USD per unit" if val else val_text
+                        elif row['dimension'] == 'r&d_investment':
+                            interpreted = f"${val} million USD" if val else val_text
+                        elif row['dimension'] == 'unit_shipments':
+                            interpreted = f"{val:,.0f} units" if val else val_text
+                        elif row['dimension'] == 'adoption_rate':
+                            interpreted = f"{val}%" if val else val_text
+                        elif row['dimension'] == 'roi_timeline':
+                            interpreted = f"{val} months" if val else val_text
+                        elif row['dimension'] == 'patents_filed':
+                            interpreted = f"{val:,.0f} patents" if val else val_text
+                        else:
+                            interpreted = val_text if val_text else str(val)
+
+                        st.markdown(f"""
+| Field | Value |
+|-------|-------|
+| **Numeric Value** | {val} |
+| **Original Text** | {val_text or '(none)'} |
+| **Interpreted As** | **{interpreted}** |
+| **Year** | {int(row['year']) if row['year'] else 'N/A'} |
+                        """)
+
+                    # Source Information with enrichment badges
+                    st.markdown("### 🔗 Source Information")
+
+                    source_name = row['source_name'] or 'Unknown'
+
+                    # Detect company type from source name
+                    if source_name.startswith('[STARTUP]'):
+                        company_badge = "🚀 **STARTUP**"
+                        company_type = "startup"
+                    elif source_name.startswith('[') and ']' in source_name:
+                        company_name = source_name[1:source_name.index(']')]
+                        company_badge = f"🏢 **{company_name}**"
+                        company_type = "established"
+                    else:
+                        company_badge = "📊 Research/Report"
+                        company_type = "research"
+
+                    # Detect verification status from notes
+                    notes = row['notes'] or ''
+                    if 'REQUIRES HUMAN VERIFICATION' in notes:
+                        verification_badge = "⚠️ Needs Human Review"
+                        verification_color = "warning"
+                    elif 'VERIFIED' in notes or row['confidence'] == 'high':
+                        verification_badge = "✅ Verified Source"
+                        verification_color = "success"
+                    elif 'PARTIAL' in notes or row['confidence'] == 'medium':
+                        verification_badge = "🔍 Partially Verified"
+                        verification_color = "info"
+                    else:
+                        verification_badge = "❓ Unverified"
+                        verification_color = "error"
+
+                    src_col1, src_col2 = st.columns(2)
+
+                    with src_col1:
+                        st.markdown(f"**Company Type:** {company_badge}")
+                        st.markdown(f"**Source:** {source_name[:60]}{'...' if len(source_name) > 60 else ''}")
+                        st.markdown(f"**Data Type:** `{row['source_type'] or 'unknown'}`")
+
+                    with src_col2:
+                        # Show verification status with appropriate styling
+                        if verification_color == "success":
+                            st.success(verification_badge)
+                        elif verification_color == "info":
+                            st.info(verification_badge)
+                        elif verification_color == "warning":
+                            st.warning(verification_badge)
+                        else:
+                            st.error(verification_badge)
+
+                        st.markdown(f"**Confidence:** `{row['confidence'] or 'unverified'}`")
+
+                    # URL section with smart detection
+                    if row['source_url']:
+                        url = row['source_url']
+                        # Check if it's a specific document vs generic homepage
+                        is_document = any(x in url.lower() for x in ['.pdf', '/report', '/filing', '/annual', 'sec.gov', 'q4cdn', 'press', 'news'])
+
+                        if is_document:
+                            st.success(f"📄 **Specific Document:** [{url[:70]}...]({url})")
+                        else:
+                            st.warning(f"🏠 **Website (may need to search for data):** [{url[:50]}...]({url})")
+                    else:
+                        st.error("❌ No URL available - requires manual research")
+
+                    # Notes with parsed verification details
+                    if notes:
+                        # Extract verification notes if present
+                        if '[Verification:' in notes:
+                            st.markdown("**Verification Notes:**")
+                            st.caption(notes[:500] + ('...' if len(notes) > 500 else ''))
+                        else:
+                            st.markdown(f"**Notes:** {notes[:300]}{'...' if len(notes) > 300 else ''}")
+
+                    st.markdown("---")
+
+                    # Edit Section
+                    st.markdown("### ✏️ Edit Data Point")
+
+                    edit_col1, edit_col2 = st.columns(2)
+
+                    with edit_col1:
+                        # Editable fields
+                        new_value = st.number_input(
+                            "Numeric Value",
+                            value=float(row['value']) if row['value'] else 0.0,
+                            key=f"val_{row['id']}"
+                        )
+
+                        new_value_text = st.text_input(
+                            "Value Text (with units)",
+                            value=row['value_text'] or "",
+                            key=f"valtxt_{row['id']}",
+                            help="E.g., '120,000 units shipped globally' or '$4.2B market size'"
+                        )
+
+                        new_year = st.number_input(
+                            "Year",
+                            value=int(row['year']) if row['year'] else 2024,
+                            min_value=2000,
+                            max_value=2035,
+                            key=f"year_{row['id']}"
+                        )
+
+                        new_notes = st.text_area(
+                            "Notes",
+                            value=row['notes'] or "",
+                            key=f"notes_{row['id']}",
+                            help="Add context, caveats, or validation notes"
+                        )
+
+                    with edit_col2:
                         new_status = st.selectbox(
-                            "Status",
+                            "Validation Status",
                             ["pending", "in_review", "validated", "rejected", "outdated"],
                             index=["pending", "in_review", "validated", "rejected", "outdated"].index(row['validation_status']) if row['validation_status'] in ["pending", "in_review", "validated", "rejected", "outdated"] else 0,
                             key=f"status_{row['id']}"
                         )
 
                         new_conf = st.selectbox(
-                            "Confidence",
+                            "Confidence Level",
                             ["high", "medium", "low", "unverified"],
                             index=["high", "medium", "low", "unverified"].index(row['confidence']) if row['confidence'] in ["high", "medium", "low", "unverified"] else 1,
-                            key=f"conf_{row['id']}"
+                            key=f"conf_{row['id']}",
+                            help="high=verified source, medium=credible estimate, low=uncertain, unverified=needs review"
                         )
 
-                        if st.button("💾 Save", key=f"save_{row['id']}"):
-                            conn = get_db_connection()
-                            cursor = conn.cursor()
-                            cursor.execute("""
-                                UPDATE data_points
-                                SET validation_status = ?, confidence = ?, validated_at = CURRENT_TIMESTAMP
-                                WHERE id = ?
-                            """, (new_status, new_conf, row['id']))
-                            conn.commit()
-                            st.success(f"Updated ID {row['id']}")
-                            st.rerun()
+                        # Sector dropdown
+                        sector_options = all_sectors['name'].tolist()
+                        current_sector_idx = sector_options.index(row['sector']) if row['sector'] in sector_options else 0
+                        new_sector = st.selectbox(
+                            "Sector",
+                            sector_options,
+                            index=current_sector_idx,
+                            key=f"sector_{row['id']}"
+                        )
+
+                        # Get subcategories for selected sector
+                        new_sector_id = all_sectors[all_sectors['name'] == new_sector]['id'].iloc[0]
+                        sector_subcats = all_subcategories[all_subcategories['sector_id'] == new_sector_id]['name'].tolist()
+                        sector_subcats = ['(none)'] + sector_subcats
+
+                        current_subcat = row['subcategory'] if row['subcategory'] else '(none)'
+                        current_subcat_idx = sector_subcats.index(current_subcat) if current_subcat in sector_subcats else 0
+
+                        new_subcategory = st.selectbox(
+                            "Subcategory",
+                            sector_subcats,
+                            index=current_subcat_idx,
+                            key=f"subcat_{row['id']}"
+                        )
+
+                    # Save button
+                    if st.button("💾 Save All Changes", key=f"save_{row['id']}", type="primary"):
+                        conn = get_db_connection()
+                        cursor = conn.cursor()
+
+                        # Get new IDs
+                        new_sector_id = all_sectors[all_sectors['name'] == new_sector]['id'].iloc[0]
+
+                        new_subcat_id = None
+                        if new_subcategory != '(none)':
+                            subcat_match = all_subcategories[(all_subcategories['name'] == new_subcategory) & (all_subcategories['sector_id'] == new_sector_id)]
+                            if not subcat_match.empty:
+                                new_subcat_id = subcat_match['id'].iloc[0]
+
+                        cursor.execute("""
+                            UPDATE data_points
+                            SET value = ?, value_text = ?, year = ?, notes = ?,
+                                validation_status = ?, confidence = ?,
+                                sector_id = ?, subcategory_id = ?,
+                                validated_at = CURRENT_TIMESTAMP,
+                                updated_at = CURRENT_TIMESTAMP
+                            WHERE id = ?
+                        """, (new_value, new_value_text, new_year, new_notes,
+                              new_status, new_conf, new_sector_id, new_subcat_id, row['id']))
+                        conn.commit()
+                        st.success(f"✅ Updated data point ID {row['id']}")
+                        st.rerun()
 
     with val_tab2:
         st.subheader("Validate Sources")
 
+        st.info("""
+        **Source Validation Guide:**
+        - **ai_generated** sources need URLs and verification
+        - Distinguish between **Company Homepage** (e.g., irobot.com) and **Specific Report** (e.g., irobot.com/investor-relations/annual-report-2024.pdf)
+        - Reliability: 0.0 = Unreliable, 0.5 = Needs verification, 0.8+ = Verified/trusted
+        """)
+
         # Source type filter
         source_type_filter = st.selectbox(
-            "Source Type",
-            ["ai_generated", "All", "research_report", "news", "company", "government"],
+            "Filter by Source Type",
+            ["ai_generated", "All", "research_report", "news", "company", "government", "academic"],
             key="src_type"
         )
 
-        # Build source query
+        # Build source query with more details
         src_query = """
             SELECT
-                id,
-                name,
-                url,
-                source_type,
-                reliability_score,
-                (SELECT COUNT(*) FROM data_points WHERE source_id = sources.id) as data_point_count
-            FROM sources
+                s.id,
+                s.name,
+                s.url,
+                s.source_type,
+                s.reliability_score,
+                (SELECT COUNT(*) FROM data_points WHERE source_id = s.id) as data_point_count
+            FROM sources s
             WHERE 1=1
         """
         src_params = []
 
         if source_type_filter != "All":
-            src_query += " AND source_type = ?"
+            src_query += " AND s.source_type = ?"
             src_params.append(source_type_filter)
 
-        src_query += " ORDER BY id DESC LIMIT 50"
+        src_query += " ORDER BY data_point_count DESC, s.id DESC LIMIT 50"
 
         src_df = run_query(src_query, tuple(src_params))
 
-        st.markdown(f"**{len(src_df)} sources** matching filters")
+        st.markdown(f"**{len(src_df)} sources** matching filters (sorted by usage)")
 
         if not src_df.empty:
             for idx, row in src_df.iterrows():
-                with st.expander(f"ID {row['id']}: {row['name'][:60]}... ({row['data_point_count']} data points)"):
-                    col1, col2 = st.columns([2, 1])
+                # Determine status icon
+                status_icon = "⚠️" if row['source_type'] == 'ai_generated' else ("✅" if row['reliability_score'] and row['reliability_score'] >= 0.7 else "🔍")
 
-                    with col1:
-                        st.markdown(f"**Name:** {row['name']}")
-                        st.markdown(f"**Current Type:** {row['source_type']}")
-                        st.markdown(f"**Reliability Score:** {row['reliability_score']}")
-                        st.markdown(f"**Data Points Using:** {row['data_point_count']}")
+                with st.expander(f"{status_icon} Source #{row['id']}: {row['name'][:50]}{'...' if len(row['name']) > 50 else ''} — {row['data_point_count']} data points"):
 
-                        if row['url']:
-                            st.markdown(f"🔗 [Visit Source]({row['url']})")
+                    # ===== CURRENT SOURCE INFO =====
+                    st.markdown("### 📋 Current Source Information")
+
+                    info_col1, info_col2 = st.columns(2)
+                    with info_col1:
+                        st.markdown(f"**Source Name:** {row['name']}")
+                        st.markdown(f"**Type:** `{row['source_type']}`")
+                    with info_col2:
+                        reliability = row['reliability_score'] if row['reliability_score'] else 0.5
+                        reliability_label = "Unreliable" if reliability < 0.4 else ("Needs Review" if reliability < 0.7 else "Trusted")
+                        st.markdown(f"**Reliability:** {reliability:.1f} ({reliability_label})")
+                        st.markdown(f"**Data Points Using This:** {row['data_point_count']}")
+
+                    # URL status
+                    current_url = row['url'] or ""
+                    # Check if it's a generic homepage vs specific report
+                    is_generic = True  # Default to generic if no URL
+                    if current_url:
+                        is_generic = not any(x in current_url.lower() for x in ['report', 'pdf', 'research', 'press', 'news', 'article', 'publication', 'investor', 'annual'])
+                        if is_generic:
+                            st.warning(f"⚠️ **Generic URL detected:** [{current_url}]({current_url}) - This appears to be a company homepage, not a specific report")
                         else:
-                            st.warning("No URL set")
+                            st.success(f"✅ **Report URL:** [{current_url}]({current_url})")
+                    else:
+                        st.error("❌ **No URL set** - This source needs a URL")
 
-                    with col2:
-                        new_url = st.text_input(
-                            "URL",
-                            value=row['url'] or "",
-                            key=f"url_{row['id']}"
+                    # ===== DATA POINTS USING THIS SOURCE =====
+                    st.markdown("### 📊 Data Points Using This Source")
+                    related_dp = run_query("""
+                        SELECT
+                            dp.id,
+                            sec.name as sector,
+                            dim.name as dimension,
+                            dp.value,
+                            dp.value_text,
+                            dp.year
+                        FROM data_points dp
+                        JOIN sectors sec ON dp.sector_id = sec.id
+                        JOIN dimensions dim ON dp.dimension_id = dim.id
+                        WHERE dp.source_id = ?
+                        LIMIT 5
+                    """, (row['id'],))
+
+                    if not related_dp.empty:
+                        # Show a summary of what data uses this source
+                        for _, dp in related_dp.iterrows():
+                            value_display = dp['value_text'] if dp['value_text'] else str(dp['value'])
+                            st.markdown(f"- **{dp['sector']}** → {dp['dimension']}: {value_display} ({dp['year']})")
+
+                        if row['data_point_count'] > 5:
+                            st.caption(f"...and {row['data_point_count'] - 5} more data points")
+                    else:
+                        st.caption("No data points currently using this source")
+
+                    # ===== EDIT SECTION =====
+                    st.markdown("### ✏️ Edit Source")
+
+                    edit_col1, edit_col2 = st.columns(2)
+
+                    with edit_col1:
+                        new_name = st.text_input(
+                            "Source Name",
+                            value=row['name'],
+                            key=f"name_{row['id']}",
+                            help="e.g., 'IFR World Robotics 2024' or 'McKinsey Global Institute'"
                         )
 
                         new_type = st.selectbox(
-                            "Type",
+                            "Source Type",
                             ["ai_generated", "research_report", "news", "company", "government", "academic"],
                             index=["ai_generated", "research_report", "news", "company", "government", "academic"].index(row['source_type']) if row['source_type'] in ["ai_generated", "research_report", "news", "company", "government", "academic"] else 0,
-                            key=f"type_{row['id']}"
+                            key=f"type_{row['id']}",
+                            help="ai_generated = Not verified | research_report = Industry report | company = Company disclosure"
                         )
 
+                    with edit_col2:
                         new_reliability = st.slider(
-                            "Reliability",
+                            "Reliability Score",
                             0.0, 1.0,
                             value=float(row['reliability_score']) if row['reliability_score'] else 0.5,
                             step=0.1,
-                            key=f"rel_{row['id']}"
+                            key=f"rel_{row['id']}",
+                            help="0.0 = Unreliable | 0.5 = Unverified | 0.8+ = Verified/trusted source"
                         )
 
-                        if st.button("💾 Save", key=f"save_src_{row['id']}"):
-                            conn = get_db_connection()
-                            cursor = conn.cursor()
-                            cursor.execute("""
-                                UPDATE sources
-                                SET url = ?, source_type = ?, reliability_score = ?
-                                WHERE id = ?
-                            """, (new_url, new_type, new_reliability, row['id']))
-                            conn.commit()
-                            st.success(f"Updated source ID {row['id']}")
-                            st.rerun()
+                    st.markdown("**URLs:**")
+                    url_col1, url_col2 = st.columns(2)
+
+                    with url_col1:
+                        # If URL looks like a specific report, pre-fill it here
+                        report_url_value = current_url if (current_url and not is_generic) else ""
+                        new_url = st.text_input(
+                            "Specific Report/Article URL",
+                            value=report_url_value,
+                            key=f"url_{row['id']}",
+                            help="Direct link to the specific report, PDF, or article containing the data"
+                        )
+
+                    with url_col2:
+                        # If URL looks generic (homepage), pre-fill it here
+                        homepage_url_value = current_url if (current_url and is_generic) else ""
+                        company_url = st.text_input(
+                            "Company/Publisher Homepage (optional)",
+                            value=homepage_url_value,
+                            key=f"compurl_{row['id']}",
+                            help="e.g., irobot.com or mckinsey.com - used if no specific report URL is available"
+                        )
+
+                    # Use specific URL if provided, otherwise fall back to company URL
+                    final_url = new_url.strip() if new_url.strip() else company_url.strip()
+
+                    if st.button("💾 Save Changes", key=f"save_src_{row['id']}"):
+                        conn = get_db_connection()
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            UPDATE sources
+                            SET name = ?, url = ?, source_type = ?, reliability_score = ?
+                            WHERE id = ?
+                        """, (new_name, final_url, new_type, new_reliability, row['id']))
+                        conn.commit()
+                        st.success(f"✅ Updated source #{row['id']}")
+                        st.rerun()
 
     with val_tab3:
         st.subheader("Validation Statistics")
