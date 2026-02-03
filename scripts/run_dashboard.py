@@ -722,9 +722,12 @@ elif page == "📈 Market Signals":
                 pp.description,
                 pp.potential_solutions,
                 pp.frequency_mentioned,
-                s.name as sector
+                sec.name as sector,
+                src.name as source_name,
+                src.url as source_url
             FROM pain_points pp
-            LEFT JOIN sectors s ON pp.sector_id = s.id
+            LEFT JOIN sectors sec ON pp.sector_id = sec.id
+            LEFT JOIN sources src ON pp.source_id = src.id
             ORDER BY pp.severity DESC, pp.frequency_mentioned DESC
             LIMIT 30
         """)
@@ -744,6 +747,13 @@ elif page == "📈 Market Signals":
                     st.markdown(row['description'][:300] + ('...' if len(row['description'] or '') > 300 else ''))
                 if row['potential_solutions']:
                     st.info(f"**Potential Solutions:** {row['potential_solutions'][:200]}")
+                # Show source link
+                if row['source_url']:
+                    st.markdown(f"📎 **Source:** [{row['source_name'] or 'View Article'}]({row['source_url']})")
+                elif row['source_name']:
+                    st.caption(f"📎 Source: {row['source_name']}")
+                else:
+                    st.caption("⚠️ No source link available")
                 st.markdown("---")
         else:
             st.info("No pain points recorded yet. Run `python scripts/refresh_data.py --pain-points` to fetch data.")

@@ -415,9 +415,17 @@ def refresh_pain_points():
         print("[WARNING] No search results found")
         return
 
+    # Remove duplicates and keep URL
+    seen_urls = set()
+    unique_results = []
+    for r in all_results:
+        if r['url'] not in seen_urls:
+            seen_urls.add(r['url'])
+            unique_results.append(r)
+
     articles_text = "\n\n".join([
-        f"Title: {r['title']}\nDescription: {r['description']}"
-        for r in all_results[:15]
+        f"Title: {r['title']}\nURL: {r['url']}\nDescription: {r['description']}"
+        for r in unique_results[:15]
     ])
 
     prompt = f"""Identify robotics industry pain points from these sources.
@@ -432,9 +440,11 @@ For each pain point, extract:
 - description: Detailed description of the challenge
 - severity: critical, high, medium, or low
 - potential_solutions: Known solutions or approaches
+- source_url: URL of the article where this pain point was mentioned
+- source_title: Title of the source article
 
 Return ONLY a JSON array. No other text.
-Example: [{{"title":"High integration costs","category":"cost","scale":"enterprise","description":"...","severity":"high","potential_solutions":"..."}}]"""
+Example: [{{"title":"High integration costs","category":"cost","scale":"enterprise","description":"...","severity":"high","potential_solutions":"...","source_url":"https://...","source_title":"Article Title"}}]"""
 
     response = call_ai(prompt, max_tokens=2000)
     if not response:
@@ -466,25 +476,45 @@ Example: [{{"title":"High integration costs","category":"cost","scale":"enterpri
             cursor.execute("SELECT id, frequency_mentioned FROM pain_points WHERE title LIKE ?", (f"%{title[:20]}%",))
             existing = cursor.fetchone()
 
+            source_url = pp.get('source_url', '')
+            source_title = pp.get('source_title', '')
+
             if existing:
-                # Update frequency
-                cursor.execute("UPDATE pain_points SET frequency_mentioned = ?, last_mentioned_date = DATE('now') WHERE id = ?",
-                             (existing[1] + 1, existing[0]))
+                # Update frequency and source if we have a better one
+                if source_url:
+                    cursor.execute("""
+                        UPDATE pain_points
+                        SET frequency_mentioned = ?, last_mentioned_date = DATE('now')
+                        WHERE id = ?
+                    """, (existing[1] + 1, existing[0]))
+                else:
+                    cursor.execute("UPDATE pain_points SET frequency_mentioned = ?, last_mentioned_date = DATE('now') WHERE id = ?",
+                                 (existing[1] + 1, existing[0]))
                 print(f"  [UPDATE] {title[:40]} (freq: {existing[1] + 1})")
             else:
+                # Create source record if we have a URL
+                source_id = None
+                if source_url:
+                    cursor.execute("""
+                        INSERT INTO sources (name, url, source_type, reliability_score)
+                        VALUES (?, ?, 'news', 0.6)
+                    """, (source_title or f"Pain point: {title[:50]}", source_url))
+                    source_id = cursor.lastrowid
+
                 cursor.execute("""
                     INSERT INTO pain_points
-                    (title, category, scale, description, severity, potential_solutions, first_identified_date, last_mentioned_date)
-                    VALUES (?, ?, ?, ?, ?, ?, DATE('now'), DATE('now'))
+                    (title, category, scale, description, severity, potential_solutions, source_id, first_identified_date, last_mentioned_date)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, DATE('now'), DATE('now'))
                 """, (
                     title,
                     pp.get('category', 'other'),
                     pp.get('scale', 'industry_wide'),
                     pp.get('description'),
                     pp.get('severity', 'medium'),
-                    pp.get('potential_solutions')
+                    pp.get('potential_solutions'),
+                    source_id
                 ))
-                print(f"  [ADD] {title[:40]}")
+                print(f"  [ADD] {title[:40]}" + (f" (source: {source_url[:30]}...)" if source_url else " (no source)"))
                 added += 1
 
         except Exception as e:
