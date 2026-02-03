@@ -237,7 +237,7 @@ with st.sidebar:
     # Navigation
     page = st.radio(
         "Navigation",
-        ["📊 Dashboard", "🏢 Companies", "📈 Market Signals", "🔍 Data Explorer", "📑 Technical Intelligence", "✅ Validation", "📋 Methodology", "💬 AI Query Interface"],
+        ["📊 Dashboard", "🏢 Companies", "📈 Market Signals", "📤 Import Data", "🔍 Data Explorer", "📑 Technical Intelligence", "✅ Validation", "📋 Methodology", "💬 AI Query Interface"],
         label_visibility="collapsed"
     )
 
@@ -779,6 +779,599 @@ elif page == "📈 Market Signals":
                 title='Pain Points Distribution'
             )
             st.plotly_chart(fig, use_container_width=True)
+
+
+elif page == "📤 Import Data":
+    st.title("Import Data")
+    st.markdown("Import data from meeting transcripts or structured JSON files.")
+
+    # Check for API key
+    api_key = get_openrouter_key()
+    if not api_key:
+        st.warning("**OpenRouter API key required for transcript processing.** Enter your key below or in the AI Query Interface page.")
+        api_key_input = st.text_input("OpenRouter API Key", type="password", placeholder="sk-or-v1-...")
+        if api_key_input:
+            st.session_state.openrouter_key = api_key_input
+            st.rerun()
+
+    import_tab1, import_tab2 = st.tabs(["📝 Meeting Transcript", "📁 JSON Import"])
+
+    with import_tab1:
+        st.subheader("Extract Data from Meeting Transcript")
+        st.markdown("""
+        Paste a meeting transcript or notes below. The AI will extract:
+        - **Funding announcements** (company, amount, round type)
+        - **Partnerships** (companies involved, type, details)
+        - **Pain points** (challenges, severity, solutions)
+        - **Company information** (new companies mentioned)
+        - **Adoption signals** (deployments, pilots, market trends)
+        """)
+
+        # Meeting metadata
+        col1, col2 = st.columns(2)
+        with col1:
+            meeting_date = st.date_input("Meeting Date", value=None, help="Date of the meeting")
+            meeting_title = st.text_input("Meeting Title/Topic", placeholder="e.g., Q1 Robotics Industry Review")
+        with col2:
+            meeting_participants = st.text_input("Participants (optional)", placeholder="e.g., John, Sarah, External: Acme Corp")
+            meeting_source_url = st.text_input("Source URL (optional)", placeholder="e.g., link to recording or document")
+
+        transcript_text = st.text_area(
+            "Paste Meeting Transcript or Notes",
+            height=300,
+            placeholder="""Paste your meeting transcript here...
+
+Example:
+"In today's call, we discussed Figure AI's recent $675M Series B led by Microsoft and OpenAI.
+They're valued at $2.6B now. We also talked about the ongoing challenge of safety certification
+for humanoid robots - it's a critical pain point that's slowing enterprise adoption.
+
+Sarah mentioned that Amazon is piloting Agility's Digit robots in 3 warehouses,
+expanding from their initial 2-warehouse test..."
+            """
+        )
+
+        if st.button("🔍 Extract Data from Transcript", type="primary", disabled=not api_key):
+            if not transcript_text.strip():
+                st.error("Please paste a transcript first.")
+            else:
+                with st.spinner("Analyzing transcript with AI..."):
+                    # Build extraction prompt
+                    extraction_prompt = f"""Analyze this meeting transcript and extract structured data about the robotics industry.
+
+MEETING TRANSCRIPT:
+{transcript_text}
+
+Extract ALL relevant information into these categories. For each item, include specific details mentioned.
+
+Return a JSON object with these arrays (use empty arrays if none found):
+
+{{
+  "funding_rounds": [
+    {{
+      "company_name": "Company that received funding",
+      "amount_millions": 123,
+      "round_type": "seed|series_a|series_b|series_c|series_d|growth|unknown",
+      "announced_date": "YYYY-MM-DD or null",
+      "lead_investors": "Investor names",
+      "valuation_millions": null,
+      "notes": "Additional context from transcript"
+    }}
+  ],
+  "partnerships": [
+    {{
+      "company1_name": "First company (robotics company)",
+      "company2_name": "Partner company",
+      "partnership_type": "integration|distribution|manufacturing|research|investment|customer|supplier|other",
+      "title": "Brief title",
+      "description": "What the partnership involves",
+      "notes": "Additional context"
+    }}
+  ],
+  "pain_points": [
+    {{
+      "title": "Brief title of the challenge",
+      "category": "technical|cost|integration|workforce|regulatory|safety|scalability|reliability|other",
+      "scale": "startup|smb|mid_market|enterprise|industry_wide",
+      "severity": "critical|high|medium|low",
+      "description": "Detailed description",
+      "potential_solutions": "Any solutions mentioned"
+    }}
+  ],
+  "companies": [
+    {{
+      "name": "Company name",
+      "company_type": "startup|enterprise|public|research",
+      "description": "What they do",
+      "notes": "Context from meeting"
+    }}
+  ],
+  "adoption_signals": [
+    {{
+      "title": "Brief description of the signal",
+      "signal_type": "deployment|pilot|rfi_rfp|hiring|budget_allocation|expansion|other",
+      "company_name": "Company involved",
+      "description": "Details",
+      "scale_indicator": "e.g., Fortune 500, 10+ locations",
+      "sentiment": "positive|neutral|negative"
+    }}
+  ]
+}}
+
+IMPORTANT:
+- Only extract information explicitly mentioned in the transcript
+- Include dollar amounts in millions (e.g., $675M = 675)
+- Use null for unknown values, don't guess
+- Include relevant quotes or context in notes fields
+
+Return ONLY valid JSON, no other text."""
+
+                    try:
+                        response = requests.post(
+                            "https://openrouter.ai/api/v1/chat/completions",
+                            headers={
+                                "Authorization": f"Bearer {api_key}",
+                                "Content-Type": "application/json"
+                            },
+                            json={
+                                "model": OPENROUTER_MODEL,
+                                "messages": [{"role": "user", "content": extraction_prompt}],
+                                "max_tokens": 4000,
+                                "temperature": 0.1
+                            },
+                            timeout=90
+                        )
+                        response.raise_for_status()
+                        ai_response = response.json()['choices'][0]['message']['content']
+
+                        # Parse JSON
+                        import re
+                        cleaned = ai_response.strip()
+                        if '```' in cleaned:
+                            cleaned = re.sub(r'```(?:json)?\s*', '', cleaned)
+                            cleaned = re.sub(r'\s*```', '', cleaned)
+
+                        extracted_data = json.loads(cleaned)
+                        st.session_state.extracted_data = extracted_data
+                        st.session_state.meeting_metadata = {
+                            'date': str(meeting_date) if meeting_date else None,
+                            'title': meeting_title,
+                            'participants': meeting_participants,
+                            'source_url': meeting_source_url
+                        }
+                        st.success("✅ Data extracted successfully! Review below.")
+
+                    except json.JSONDecodeError as e:
+                        st.error(f"Failed to parse AI response: {e}")
+                        st.text_area("Raw AI Response", ai_response, height=200)
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+
+        # Display extracted data for review
+        if 'extracted_data' in st.session_state and st.session_state.extracted_data:
+            st.markdown("---")
+            st.subheader("📋 Review Extracted Data")
+            st.markdown("Review and edit the extracted data before importing. Uncheck items you don't want to import.")
+
+            extracted = st.session_state.extracted_data
+            metadata = st.session_state.get('meeting_metadata', {})
+
+            # Source info
+            source_name = f"Meeting: {metadata.get('title', 'Untitled')}" if metadata.get('title') else "Meeting transcript"
+            if metadata.get('date'):
+                source_name += f" ({metadata.get('date')})"
+
+            st.info(f"**Source:** {source_name}")
+
+            items_to_import = {'funding': [], 'partnerships': [], 'pain_points': [], 'companies': [], 'adoption': []}
+
+            # Funding Rounds
+            if extracted.get('funding_rounds'):
+                st.markdown("### 💰 Funding Rounds")
+                for i, f in enumerate(extracted['funding_rounds']):
+                    col1, col2 = st.columns([0.1, 0.9])
+                    with col1:
+                        include = st.checkbox("", value=True, key=f"fund_{i}")
+                    with col2:
+                        amount = f"${f.get('amount_millions')}M" if f.get('amount_millions') else "Undisclosed"
+                        st.markdown(f"**{f.get('company_name', 'Unknown')}** — {amount} ({f.get('round_type', 'unknown')})")
+                        if f.get('lead_investors'):
+                            st.caption(f"Lead: {f.get('lead_investors')}")
+                        if f.get('notes'):
+                            st.caption(f"Notes: {f.get('notes')}")
+                    if include:
+                        items_to_import['funding'].append(f)
+
+            # Partnerships
+            if extracted.get('partnerships'):
+                st.markdown("### 🤝 Partnerships")
+                for i, p in enumerate(extracted['partnerships']):
+                    col1, col2 = st.columns([0.1, 0.9])
+                    with col1:
+                        include = st.checkbox("", value=True, key=f"part_{i}")
+                    with col2:
+                        st.markdown(f"**{p.get('company1_name', '?')}** ↔ **{p.get('company2_name', '?')}** ({p.get('partnership_type', 'other')})")
+                        if p.get('description'):
+                            st.caption(p.get('description')[:150])
+                    if include:
+                        items_to_import['partnerships'].append(p)
+
+            # Pain Points
+            if extracted.get('pain_points'):
+                st.markdown("### ⚠️ Pain Points")
+                for i, pp in enumerate(extracted['pain_points']):
+                    col1, col2 = st.columns([0.1, 0.9])
+                    with col1:
+                        include = st.checkbox("", value=True, key=f"pain_{i}")
+                    with col2:
+                        severity_emoji = {'critical': '🔴', 'high': '🟠', 'medium': '🟡', 'low': '🟢'}.get(pp.get('severity'), '⚪')
+                        st.markdown(f"{severity_emoji} **{pp.get('title', 'Untitled')}** ({pp.get('category', 'other')})")
+                        if pp.get('description'):
+                            st.caption(pp.get('description')[:150])
+                    if include:
+                        items_to_import['pain_points'].append(pp)
+
+            # Companies
+            if extracted.get('companies'):
+                st.markdown("### 🏢 Companies")
+                for i, c in enumerate(extracted['companies']):
+                    col1, col2 = st.columns([0.1, 0.9])
+                    with col1:
+                        include = st.checkbox("", value=True, key=f"comp_{i}")
+                    with col2:
+                        st.markdown(f"**{c.get('name', 'Unknown')}** ({c.get('company_type', 'startup')})")
+                        if c.get('description'):
+                            st.caption(c.get('description')[:100])
+                    if include:
+                        items_to_import['companies'].append(c)
+
+            # Adoption Signals
+            if extracted.get('adoption_signals'):
+                st.markdown("### 📊 Adoption Signals")
+                for i, a in enumerate(extracted['adoption_signals']):
+                    col1, col2 = st.columns([0.1, 0.9])
+                    with col1:
+                        include = st.checkbox("", value=True, key=f"adopt_{i}")
+                    with col2:
+                        sentiment_emoji = {'positive': '📈', 'neutral': '➡️', 'negative': '📉'}.get(a.get('sentiment'), '➡️')
+                        st.markdown(f"{sentiment_emoji} **{a.get('title', 'Untitled')}** ({a.get('signal_type', 'other')})")
+                        if a.get('company_name'):
+                            st.caption(f"Company: {a.get('company_name')}")
+                    if include:
+                        items_to_import['adoption'].append(a)
+
+            # Summary and import button
+            st.markdown("---")
+            total_items = sum(len(v) for v in items_to_import.values())
+
+            if total_items > 0:
+                st.markdown(f"**Ready to import {total_items} items:**")
+                summary_parts = []
+                if items_to_import['funding']:
+                    summary_parts.append(f"{len(items_to_import['funding'])} funding rounds")
+                if items_to_import['partnerships']:
+                    summary_parts.append(f"{len(items_to_import['partnerships'])} partnerships")
+                if items_to_import['pain_points']:
+                    summary_parts.append(f"{len(items_to_import['pain_points'])} pain points")
+                if items_to_import['companies']:
+                    summary_parts.append(f"{len(items_to_import['companies'])} companies")
+                if items_to_import['adoption']:
+                    summary_parts.append(f"{len(items_to_import['adoption'])} adoption signals")
+                st.markdown(", ".join(summary_parts))
+
+                if st.button("✅ Import Selected Data", type="primary"):
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+                    imported_counts = {'funding': 0, 'partnerships': 0, 'pain_points': 0, 'companies': 0, 'adoption': 0}
+
+                    try:
+                        # Create source record for this meeting
+                        cursor.execute("""
+                            INSERT INTO sources (name, url, source_type, reliability_score)
+                            VALUES (?, ?, 'meeting', 0.8)
+                        """, (source_name, metadata.get('source_url') or ''))
+                        source_id = cursor.lastrowid
+
+                        # Helper to get or create company
+                        def get_or_create_company(name, company_type='startup'):
+                            cursor.execute("SELECT id FROM companies WHERE name = ?", (name,))
+                            result = cursor.fetchone()
+                            if result:
+                                return result[0]
+                            cursor.execute("""
+                                INSERT INTO companies (name, company_type, status)
+                                VALUES (?, ?, 'active')
+                            """, (name, company_type))
+                            return cursor.lastrowid
+
+                        # Import companies first
+                        for c in items_to_import['companies']:
+                            name = c.get('name', '').strip()
+                            if name:
+                                cursor.execute("SELECT id FROM companies WHERE name = ?", (name,))
+                                if not cursor.fetchone():
+                                    cursor.execute("""
+                                        INSERT INTO companies (name, company_type, description, status)
+                                        VALUES (?, ?, ?, 'active')
+                                    """, (name, c.get('company_type', 'startup'), c.get('description')))
+                                    imported_counts['companies'] += 1
+
+                        # Import funding rounds
+                        for f in items_to_import['funding']:
+                            company_name = f.get('company_name', '').strip()
+                            if company_name and f.get('amount_millions'):
+                                company_id = get_or_create_company(company_name)
+                                # Check duplicate
+                                cursor.execute("""
+                                    SELECT id FROM funding_rounds
+                                    WHERE company_id = ? AND amount_millions = ?
+                                """, (company_id, f.get('amount_millions')))
+                                if not cursor.fetchone():
+                                    cursor.execute("""
+                                        INSERT INTO funding_rounds
+                                        (company_id, round_type, amount_millions, announced_date, lead_investors, source_id, notes)
+                                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                                    """, (
+                                        company_id,
+                                        f.get('round_type', 'unknown'),
+                                        f.get('amount_millions'),
+                                        f.get('announced_date'),
+                                        f.get('lead_investors'),
+                                        source_id,
+                                        f.get('notes')
+                                    ))
+                                    imported_counts['funding'] += 1
+
+                        # Import partnerships
+                        for p in items_to_import['partnerships']:
+                            c1_name = p.get('company1_name', '').strip()
+                            c2_name = p.get('company2_name', '').strip()
+                            if c1_name and c2_name:
+                                c1_id = get_or_create_company(c1_name)
+                                cursor.execute("""
+                                    INSERT INTO partnerships
+                                    (company1_id, company2_name, partnership_type, title, description, source_id)
+                                    VALUES (?, ?, ?, ?, ?, ?)
+                                """, (
+                                    c1_id,
+                                    c2_name,
+                                    p.get('partnership_type', 'other'),
+                                    p.get('title'),
+                                    p.get('description'),
+                                    source_id
+                                ))
+                                imported_counts['partnerships'] += 1
+
+                        # Import pain points
+                        for pp in items_to_import['pain_points']:
+                            title = pp.get('title', '').strip()
+                            if title:
+                                cursor.execute("""
+                                    INSERT INTO pain_points
+                                    (title, category, scale, severity, description, potential_solutions, source_id, first_identified_date, last_mentioned_date)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, DATE('now'), DATE('now'))
+                                """, (
+                                    title,
+                                    pp.get('category', 'other'),
+                                    pp.get('scale', 'industry_wide'),
+                                    pp.get('severity', 'medium'),
+                                    pp.get('description'),
+                                    pp.get('potential_solutions'),
+                                    source_id
+                                ))
+                                imported_counts['pain_points'] += 1
+
+                        # Import adoption signals
+                        for a in items_to_import['adoption']:
+                            title = a.get('title', '').strip()
+                            if title:
+                                company_id = None
+                                if a.get('company_name'):
+                                    company_id = get_or_create_company(a.get('company_name'))
+                                cursor.execute("""
+                                    INSERT INTO adoption_signals
+                                    (title, signal_type, company_id, company_name, description, scale_indicator, sentiment, source_id)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                """, (
+                                    title,
+                                    a.get('signal_type', 'other'),
+                                    company_id,
+                                    a.get('company_name'),
+                                    a.get('description'),
+                                    a.get('scale_indicator'),
+                                    a.get('sentiment', 'neutral'),
+                                    source_id
+                                ))
+                                imported_counts['adoption'] += 1
+
+                        # Update company funding totals
+                        cursor.execute("""
+                            UPDATE companies SET total_funding_millions = (
+                                SELECT SUM(amount_millions) FROM funding_rounds WHERE funding_rounds.company_id = companies.id
+                            )
+                        """)
+
+                        conn.commit()
+
+                        # Show success
+                        st.success(f"""✅ **Import Complete!**
+- {imported_counts['companies']} companies
+- {imported_counts['funding']} funding rounds
+- {imported_counts['partnerships']} partnerships
+- {imported_counts['pain_points']} pain points
+- {imported_counts['adoption']} adoption signals
+
+Source: {source_name}""")
+
+                        # Clear session state
+                        del st.session_state.extracted_data
+                        if 'meeting_metadata' in st.session_state:
+                            del st.session_state.meeting_metadata
+
+                    except Exception as e:
+                        conn.rollback()
+                        st.error(f"Import failed: {e}")
+                    finally:
+                        conn.close()
+            else:
+                st.warning("No items selected for import.")
+
+    with import_tab2:
+        st.subheader("Import from JSON File")
+        st.markdown("""
+        Upload a JSON file with structured data. The file should contain one or more of these arrays:
+        - `funding_rounds`
+        - `partnerships`
+        - `pain_points`
+        - `companies`
+        - `adoption_signals`
+        """)
+
+        st.markdown("**Expected JSON format:**")
+        with st.expander("View JSON Schema"):
+            st.code('''{
+  "source": {
+    "name": "Source name (required)",
+    "url": "https://source-url.com",
+    "type": "report|news|meeting|company"
+  },
+  "funding_rounds": [
+    {
+      "company_name": "Company Name",
+      "amount_millions": 100,
+      "round_type": "series_a",
+      "announced_date": "2025-01-15",
+      "lead_investors": "Investor A, Investor B"
+    }
+  ],
+  "partnerships": [
+    {
+      "company1_name": "Robotics Co",
+      "company2_name": "Partner Co",
+      "partnership_type": "integration",
+      "title": "Partnership title",
+      "description": "Details..."
+    }
+  ],
+  "pain_points": [
+    {
+      "title": "Pain point title",
+      "category": "technical",
+      "severity": "high",
+      "scale": "enterprise",
+      "description": "Details...",
+      "potential_solutions": "Solutions..."
+    }
+  ]
+}''', language='json')
+
+        uploaded_file = st.file_uploader("Upload JSON file", type=['json'])
+
+        if uploaded_file:
+            try:
+                json_data = json.load(uploaded_file)
+                st.success(f"✅ Loaded JSON file: {uploaded_file.name}")
+
+                # Show preview
+                st.markdown("**Preview:**")
+                for key in ['funding_rounds', 'partnerships', 'pain_points', 'companies', 'adoption_signals']:
+                    if key in json_data and json_data[key]:
+                        st.markdown(f"- **{key}**: {len(json_data[key])} items")
+
+                source_info = json_data.get('source', {})
+                source_name = source_info.get('name', uploaded_file.name)
+                source_url = source_info.get('url', '')
+
+                st.info(f"**Source:** {source_name}")
+
+                if st.button("✅ Import JSON Data", type="primary"):
+                    conn = get_db_connection()
+                    cursor = conn.cursor()
+
+                    try:
+                        # Create source
+                        cursor.execute("""
+                            INSERT INTO sources (name, url, source_type, reliability_score)
+                            VALUES (?, ?, ?, 0.7)
+                        """, (source_name, source_url, source_info.get('type', 'report')))
+                        source_id = cursor.lastrowid
+
+                        def get_or_create_company(name, company_type='startup'):
+                            cursor.execute("SELECT id FROM companies WHERE name = ?", (name,))
+                            result = cursor.fetchone()
+                            if result:
+                                return result[0]
+                            cursor.execute("INSERT INTO companies (name, company_type, status) VALUES (?, ?, 'active')", (name, company_type))
+                            return cursor.lastrowid
+
+                        counts = {'funding': 0, 'partnerships': 0, 'pain_points': 0, 'companies': 0, 'adoption': 0}
+
+                        # Import each type
+                        for f in json_data.get('funding_rounds', []):
+                            if f.get('company_name') and f.get('amount_millions'):
+                                company_id = get_or_create_company(f['company_name'])
+                                cursor.execute("""
+                                    INSERT INTO funding_rounds (company_id, round_type, amount_millions, announced_date, lead_investors, source_id)
+                                    VALUES (?, ?, ?, ?, ?, ?)
+                                """, (company_id, f.get('round_type', 'unknown'), f['amount_millions'], f.get('announced_date'), f.get('lead_investors'), source_id))
+                                counts['funding'] += 1
+
+                        for p in json_data.get('partnerships', []):
+                            if p.get('company1_name') and p.get('company2_name'):
+                                c1_id = get_or_create_company(p['company1_name'])
+                                cursor.execute("""
+                                    INSERT INTO partnerships (company1_id, company2_name, partnership_type, title, description, source_id)
+                                    VALUES (?, ?, ?, ?, ?, ?)
+                                """, (c1_id, p['company2_name'], p.get('partnership_type', 'other'), p.get('title'), p.get('description'), source_id))
+                                counts['partnerships'] += 1
+
+                        for pp in json_data.get('pain_points', []):
+                            if pp.get('title'):
+                                cursor.execute("""
+                                    INSERT INTO pain_points (title, category, scale, severity, description, potential_solutions, source_id, first_identified_date, last_mentioned_date)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, DATE('now'), DATE('now'))
+                                """, (pp['title'], pp.get('category', 'other'), pp.get('scale', 'industry_wide'), pp.get('severity', 'medium'), pp.get('description'), pp.get('potential_solutions'), source_id))
+                                counts['pain_points'] += 1
+
+                        for c in json_data.get('companies', []):
+                            if c.get('name'):
+                                cursor.execute("SELECT id FROM companies WHERE name = ?", (c['name'],))
+                                if not cursor.fetchone():
+                                    cursor.execute("INSERT INTO companies (name, company_type, description, status) VALUES (?, ?, ?, 'active')",
+                                                 (c['name'], c.get('company_type', 'startup'), c.get('description')))
+                                    counts['companies'] += 1
+
+                        for a in json_data.get('adoption_signals', []):
+                            if a.get('title'):
+                                company_id = get_or_create_company(a['company_name']) if a.get('company_name') else None
+                                cursor.execute("""
+                                    INSERT INTO adoption_signals (title, signal_type, company_id, company_name, description, scale_indicator, sentiment, source_id)
+                                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                """, (a['title'], a.get('signal_type', 'other'), company_id, a.get('company_name'), a.get('description'), a.get('scale_indicator'), a.get('sentiment', 'neutral'), source_id))
+                                counts['adoption'] += 1
+
+                        cursor.execute("""
+                            UPDATE companies SET total_funding_millions = (
+                                SELECT SUM(amount_millions) FROM funding_rounds WHERE funding_rounds.company_id = companies.id
+                            )
+                        """)
+
+                        conn.commit()
+                        st.success(f"""✅ **Import Complete!**
+- {counts['companies']} companies
+- {counts['funding']} funding rounds
+- {counts['partnerships']} partnerships
+- {counts['pain_points']} pain points
+- {counts['adoption']} adoption signals""")
+
+                    except Exception as e:
+                        conn.rollback()
+                        st.error(f"Import failed: {e}")
+                    finally:
+                        conn.close()
+
+            except json.JSONDecodeError as e:
+                st.error(f"Invalid JSON file: {e}")
 
 
 elif page == "🔍 Data Explorer":
