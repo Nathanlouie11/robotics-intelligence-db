@@ -232,14 +232,26 @@ def get_ai_backend() -> str:
 # Sidebar
 with st.sidebar:
     st.title("🤖 Robotics Intelligence")
+
+    # Import Data button at top
+    if st.button("📤 Import Data", use_container_width=True):
+        st.session_state.current_page = "📤 Import Data"
+
     st.markdown("---")
 
     # Navigation
-    page = st.radio(
+    nav_selection = st.radio(
         "Navigation",
-        ["📊 Dashboard", "🏢 Companies", "📈 Market Signals", "📤 Import Data", "🔍 Data Explorer", "📑 Technical Intelligence", "✅ Validation", "📋 Methodology", "💬 AI Query Interface"],
+        ["📊 Dashboard", "🏢 Companies", "📈 Market Signals", "🔍 Data Explorer", "📑 Technical Intelligence", "✅ Validation", "📋 Methodology", "💬 AI Query Interface"],
         label_visibility="collapsed"
     )
+
+    # Handle page selection (button overrides radio)
+    if 'current_page' in st.session_state and st.session_state.current_page == "📤 Import Data":
+        page = "📤 Import Data"
+    else:
+        page = nav_selection
+        st.session_state.current_page = nav_selection
 
     st.markdown("---")
 
